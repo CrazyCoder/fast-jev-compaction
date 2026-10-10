@@ -10,8 +10,8 @@
  * changed, update the index, and search it.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, delimiter, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projects, readSession, transcripts } from './files.ts';
 import { dateOf, sessionLabel, sessionTitle, type IndexedHit, type SessionIndex } from './sessions.ts';
@@ -67,23 +67,45 @@ export function sessionMarkdown(title: string, label: string, entries: readonly 
   return [`# ${title}`, '', label, '', ...blocks.flatMap((b) => [b, ''])].join('\n');
 }
 
-/** Writes the markdown of every session whose transcript changed since; returns how many. */
-export async function exportSessions(configDir: string): Promise<number> {
-  let written = 0;
+/**
+ * Writes the markdown of every session whose transcript changed since, but
+ * the session `exclude` (the current one, which changes on every call), and
+ * deletes the markdown of transcripts Claude Code has deleted. Exports are
+ * readable by their owner only. Returns how many changed.
+ */
+export async function exportSessions(configDir: string, exclude?: string): Promise<number> {
+  let changedCount = 0;
+  const root = sessionsDir(configDir);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const live = new Set<string>();
   for (const project of projects(configDir)) {
     for (const file of transcripts(project.dir)) {
       const id = basename(file, '.jsonl');
-      const md = join(sessionsDir(configDir), project.slug, `${id}.md`);
-      const changed = statSync(file).mtimeMs;
-      if (existsSync(md) && statSync(md).mtimeMs >= changed) continue;
-      const { entries, meta } = await readSession(file);
-      const name = meta.cwd ? basename(meta.cwd.replace(/[\\/]+$/, '').replace(/\\/g, '/')) : project.slug;
-      mkdirSync(join(sessionsDir(configDir), project.slug), { recursive: true });
-      writeFileSync(md, sessionMarkdown(sessionTitle(meta), `${name} · ${dateOf(changed)} · ${id}`, entries));
-      written += 1;
+      const md = join(root, project.slug, `${id}.md`);
+      live.add(md);
+      if (id === exclude) continue;
+      try {
+        const changed = statSync(file).mtimeMs;
+        if (existsSync(md) && statSync(md).mtimeMs >= changed) continue;
+        const { entries, meta } = await readSession(file);
+        const name = meta.cwd ? basename(meta.cwd.replace(/[\\/]+$/, '').replace(/\\/g, '/')) : project.slug;
+        mkdirSync(join(root, project.slug), { recursive: true, mode: 0o700 });
+        writeFileSync(md, sessionMarkdown(sessionTitle(meta), `${name} · ${dateOf(changed)} · ${id}`, entries), { mode: 0o600 });
+        changedCount += 1;
+      } catch {
+        // A transcript deleted or unreadable mid-export is left out this time.
+      }
     }
   }
-  return written;
+  for (const slug of readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory())) {
+    for (const name of readdirSync(join(root, slug.name)).filter((n) => n.endsWith('.md'))) {
+      const md = join(root, slug.name, name);
+      if (live.has(md)) continue;
+      rmSync(md, { force: true });
+      changedCount += 1;
+    }
+  }
+  return changedCount;
 }
 
 type QmdResult = { file?: unknown; line?: unknown; snippet?: unknown };
@@ -122,9 +144,12 @@ export function indexedHits(configDir: string, json: string, slugs: ReadonlySet<
   return hits;
 }
 
-function runQmd(command: readonly string[], name: string, args: readonly string[]) {
+type Env = NodeJS.ProcessEnv;
+
+function runQmd(command: readonly string[], name: string, args: readonly string[], env: Env) {
   return spawnSync(command[0]!, [...command.slice(1), '--index', name, ...args], {
     encoding: 'utf8',
+    env,
     maxBuffer: 64 * 1024 * 1024,
     timeout: QMD_TIMEOUT_MS,
     windowsHide: true,
@@ -135,30 +160,38 @@ const marker = (configDir: string, name: string) => join(sessionsDir(configDir),
 const building = (configDir: string, name: string) => join(sessionsDir(configDir), `.building-${name}`);
 
 /** Exports every session and builds the index; marks it ready when qmd succeeds. */
-export async function buildIndex(configDir: string, command: readonly string[], name: string): Promise<boolean> {
-  mkdirSync(sessionsDir(configDir), { recursive: true });
-  writeFileSync(building(configDir, name), String(Date.now()));
+export async function buildIndex(configDir: string, command: readonly string[], name: string, env: Env = process.env): Promise<boolean> {
   await exportSessions(configDir);
   // A collection left from an earlier build may point elsewhere: add it afresh.
-  runQmd(command, name, ['collection', 'remove', COLLECTION]);
-  runQmd(command, name, ['collection', 'add', sessionsDir(configDir), '--name', COLLECTION]);
-  const updated = runQmd(command, name, ['update']);
+  runQmd(command, name, ['collection', 'remove', COLLECTION], env);
+  runQmd(command, name, ['collection', 'add', sessionsDir(configDir), '--name', COLLECTION], env);
+  const updated = runQmd(command, name, ['update'], env);
   if (updated.status !== 0) return false;
   writeFileSync(marker(configDir, name), new Date().toISOString());
-  writeFileSync(building(configDir, name), '');
+  rmSync(building(configDir, name), { force: true });
   return true;
+}
+
+/** Takes the build lock, unless a build that is not stale holds it. */
+function takeBuildLock(lock: string): boolean {
+  try {
+    writeFileSync(lock, String(Date.now()), { flag: 'wx' });
+    return true;
+  } catch {
+    const since = Number(readFileSync(lock, 'utf8'));
+    if (since && Date.now() - since < BUILD_STALE_MS) return false;
+    writeFileSync(lock, String(Date.now()));
+    return true;
+  }
 }
 
 /** Starts buildIndex in a process of its own that outlives this one, unless one is running. */
 function buildInBackground(configDir: string, command: readonly string[], name: string): void {
-  const lock = building(configDir, name);
-  if (existsSync(lock)) {
-    const since = Number(readFileSync(lock, 'utf8'));
-    if (since && Date.now() - since < BUILD_STALE_MS) return;
-  }
-  mkdirSync(sessionsDir(configDir), { recursive: true });
-  writeFileSync(lock, String(Date.now()));
-  const cli = fileURLToPath(new URL('./cli.ts', import.meta.url));
+  mkdirSync(sessionsDir(configDir), { recursive: true, mode: 0o700 });
+  if (!takeBuildLock(building(configDir, name))) return;
+  // cli.ts beside this file when run from source, cli.js in the built library.
+  const self = fileURLToPath(import.meta.url);
+  const cli = join(dirname(self), `cli${extname(self)}`);
   spawn(process.execPath, [cli, '--build-index', configDir, name, ...command], {
     detached: true,
     stdio: 'ignore',
@@ -166,22 +199,31 @@ function buildInBackground(configDir: string, command: readonly string[], name: 
   }).unref();
 }
 
-export type QmdIndexOptions = { command: readonly string[]; name?: string; background?: boolean };
+export type QmdIndexOptions = { command: readonly string[]; name?: string; background?: boolean; env?: Env };
 
-/** The qmd session index as searchSessions takes it. */
-export function qmdIndex(configDir: string, { command, name = QMD_INDEX, background = true }: QmdIndexOptions): SessionIndex {
+/**
+ * The qmd session index as searchSessions takes it. It answers only with hits
+ * in the asked projects; otherwise (no such hit, output that is not JSON, a
+ * failed search) the scan answers, and a failed search marks the index for a
+ * rebuild.
+ */
+export function qmdIndex(configDir: string, { command, name = QMD_INDEX, background = true, env = process.env }: QmdIndexOptions): SessionIndex {
   return async (query, slugs, exclude) => {
     if (!existsSync(marker(configDir, name))) {
       if (background) {
         buildInBackground(configDir, command, name);
         return undefined;
       }
-      if (!(await buildIndex(configDir, command, name))) return undefined;
-    } else if ((await exportSessions(configDir)) > 0) {
-      runQmd(command, name, ['update']);
+      if (!(await buildIndex(configDir, command, name, env))) return undefined;
+    } else if ((await exportSessions(configDir, exclude)) > 0) {
+      runQmd(command, name, ['update'], env);
     }
-    const found = runQmd(command, name, ['search', query, '-c', COLLECTION, '--format', 'json', '-n', String(SEARCH_HITS)]);
-    if (found.status !== 0) return undefined;
-    return indexedHits(configDir, found.stdout, slugs, exclude);
+    const found = runQmd(command, name, ['search', '-c', COLLECTION, '--format', 'json', '-n', String(SEARCH_HITS), '--', query], env);
+    if (found.status !== 0) {
+      rmSync(marker(configDir, name), { force: true });
+      return undefined;
+    }
+    const hits = indexedHits(configDir, found.stdout, slugs, exclude);
+    return hits.length > 0 ? hits : undefined;
   };
 }

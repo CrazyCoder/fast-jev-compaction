@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: tools/node.cmd under bash
         if: runner.os != 'Windows'
-        run: bash tools/node.cmd -e "process.stdout.write(process.version)" | grep -x "v$(sed -n 's/^export TOOL_VERSION=\"\(.*\)\"/\1/p' tools/node.cmd)"
+        run: bash tools/node.cmd -e "process.stdout.write(process.version)" | grep -x "v$(sed -n 's/^export TOOL_VERSION="\(.*\)"/\1/p' tools/node.cmd)"
       - name: tools\node.cmd under cmd.exe
         if: runner.os == 'Windows'
         shell: cmd

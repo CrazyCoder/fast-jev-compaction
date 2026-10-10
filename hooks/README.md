@@ -213,19 +213,24 @@ copies after each boundary, and keeps each call's first, uncut result:
   `project: "<part of a folder name or working directory>"` in other projects,
   `project: "all"` in every one. A session counts when it holds every keyword
   (any keyword when none holds all); ripgrep picks those transcripts when it is
-  on the PATH, and only their matching lines are read. Each hit is labelled with
-  the project, the date, the session title (or first prompt) and the session id.
-  With qmd installed and `sessionIndex: "auto"` (the default), the search goes
-  through a qmd index instead: each transcript is exported as markdown to
+  on the PATH, and only their matching lines are read, for at most 30 s. A query
+  of only stopwords or single characters is refused. Hits are numbered by rank
+  and labelled with the project, the date, the session title (or first prompt)
+  and the session id; open one with `session`. With qmd installed and
+  `sessionIndex: "auto"` (the default), the search goes through a qmd index
+  instead: each transcript is exported as markdown to
   `<config dir>/fast-jev-compaction/sessions/<project>/<session>.md` (prompts,
   replies, calls with the head of their results) and indexed in a qmd index of
   its own, `fast-jev-sessions` (`~/.cache/qmd/fast-jev-sessions.sqlite`,
   `~/.config/qmd/fast-jev-sessions.yml`), apart from the default one. The first
   search builds it in the background and is answered by the scan; later searches
-  re-export the sessions that changed, update the index and return one hit per
-  session. The markdown copies stay when Claude Code removes old transcripts;
-  delete the folder to drop them. On Windows the npm `qmd.cmd` shim is run as
-  its script under the shim's own Node. `sessionIndex: "off"` always scans.
+  re-export the sessions that changed (not the current one), update the index
+  and search it. When the index finds nothing in the asked projects, or a search
+  fails, the scan answers; a failed search rebuilds the index next time. Exports
+  are readable by their owner only, and an export goes when Claude Code removes
+  its transcript after `cleanupPeriodDays`. On Windows the npm `qmd.cmd` shim is
+  run as its script under the shim's own Node. `sessionIndex: "off"` always
+  scans.
 - `session: "<id or its first 8+ characters>"` runs `query`, `expand`, `range`,
   `touched` or `agent` on that session instead of this one.
 - `agent`: subagents keep their own transcripts under `<session>/subagents/`.
@@ -237,9 +242,9 @@ copies after each boundary, and keeps each call's first, uncut result:
 An answer holds at most 48,000 characters, shared between expanded entries.
 Recall's own calls are not listed. Cut notes end with
 `full text: recall expand ["<tool_use_id>"]` instead of telling the model to run
-the tool again. Recall keeps no copy of its own: what it can read is what the
-transcript holds, until Claude Code removes old transcripts after
-`cleanupPeriodDays`. The ranking and regex mode are adapted from
+the tool again. Recall reads what the transcripts hold, until Claude Code
+removes old ones after `cleanupPeriodDays`; the only copies are the session
+index's exports above. The ranking and regex mode are adapted from
 [pi-vcc](https://github.com/sting8k/pi-vcc), the answer budget from
 [pi-blackhole](https://github.com/k0valik/pi-blackhole) (both MIT).
 

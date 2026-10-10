@@ -1,5 +1,4 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -81,25 +80,99 @@ describe('session export', () => {
   });
 });
 
+/**
+ * A stand-in for qmd: logs its arguments, answers `search` with FAKE_SEARCH
+ * and FAKE_STATUS, and succeeds at everything else.
+ */
+function fakeQmd(): { command: string[]; log: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'fake-qmd-'));
+  const script = join(dir, 'qmd.cjs');
+  const log = join(dir, 'args.log');
+  writeFileSync(
+    script,
+    [
+      "const fs = require('fs');",
+      'const args = process.argv.slice(2);',
+      'fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + "\\n");',
+      "if (args.includes('search')) { process.stdout.write(process.env.FAKE_SEARCH ?? '[]'); process.exit(Number(process.env.FAKE_STATUS ?? 0)); }",
+    ].join('\n'),
+  );
+  return { command: [process.execPath, script], log };
+}
+
+describe('the session index', () => {
+  const ask = async (dir: string, query: string, project: string, env: Record<string, string>) => {
+    const fake = fakeQmd();
+    const index = qmdIndex(dir, { command: fake.command, name: 'fake', background: false, env: { ...process.env, FAKE_LOG: fake.log, ...env } });
+    const hits = await index(query, new Set([project]), 'none');
+    const calls = readFileSync(fake.log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]);
+    return { hits, calls };
+  };
+  const hitIn = (slug: string, id: string) => JSON.stringify([{ file: `qmd://sessions/${slug}/${id}.md`, line: 1, snippet: 'x' }]);
+
+  it('ends the options before the query, so a query starting with "-" is searched', async () => {
+    const { calls } = await ask(config(), '-jscpd', 'c--work-billing-api', { FAKE_SEARCH: hitIn('c--work-billing-api', ID) });
+    expect(calls.find((c) => c.includes('search'))!.slice(-2)).toEqual(['--', '-jscpd']);
+  });
+
+  it('leaves the search to the scan when qmd finds nothing in the asked projects, or does not answer JSON', async () => {
+    const dir = config();
+    expect((await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: hitIn('c--other', ID) })).hits).toBeUndefined();
+    expect((await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: 'No results found.' })).hits).toBeUndefined();
+    expect((await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: hitIn('c--work-billing-api', ID) })).hits).toHaveLength(1);
+  });
+
+  it('rebuilds the index after a search fails, as when its file was deleted', async () => {
+    const dir = config();
+    await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: '[]' });
+    expect(readdirSync(sessionsDir(dir))).toContain('.indexed-fake');
+    await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_STATUS: '1' });
+    expect(readdirSync(sessionsDir(dir))).not.toContain('.indexed-fake');
+    const { calls } = await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: '[]' });
+    expect(calls.some((c) => c.includes('update'))).toBe(true);
+  });
+});
+
+describe('session export upkeep', () => {
+  it('skips the current session, drops exports whose transcript is gone, and survives an unreadable transcript', async () => {
+    const dir = config();
+    const project = join(dir, 'projects', 'c--work-billing-api');
+    const other = '55555555-5555-4555-8555-555555555555';
+    writeFileSync(join(project, `${other}.jsonl`), JSON.stringify({ type: 'user', message: { content: 'gone soon' } }));
+    mkdirSync(join(project, '66666666-6666-4666-8666-666666666666.jsonl'));
+    expect(await exportSessions(dir, ID)).toBe(1);
+    const exported = join(sessionsDir(dir), 'c--work-billing-api');
+    expect(readdirSync(exported)).toEqual([`${other}.md`]);
+    rmSync(join(project, `${other}.jsonl`));
+    await exportSessions(dir, ID);
+    expect(readdirSync(exported)).toEqual([]);
+  });
+
+  it.skipIf(process.platform === 'win32')('writes exports readable by their owner only', async () => {
+    const dir = config();
+    await exportSessions(dir);
+    expect(statSync(join(sessionsDir(dir), 'c--work-billing-api', `${ID}.md`)).mode & 0o777).toBe(0o600);
+    expect(statSync(sessionsDir(dir)).mode & 0o777).toBe(0o700);
+  });
+});
+
 const qmd = qmdCommand();
-const INDEX = `fjc-test-${process.pid}`;
 
 describe.runIf(qmd)('with the installed qmd', () => {
-  afterAll(() => {
-    spawnSync(qmd![0]!, [...qmd!.slice(1), '--index', INDEX, 'collection', 'remove', 'sessions'], { encoding: 'utf8' });
-    // qmd keeps an index in ~/.cache/qmd/<name>.sqlite and its collections in ~/.config/qmd/<name>.yml.
-    const files = ['', '-wal', '-shm'].map((suffix) => join(homedir(), '.cache', 'qmd', `${INDEX}.sqlite${suffix}`));
-    for (const file of [...files, join(homedir(), '.config', 'qmd', `${INDEX}.yml`)]) {
-      if (existsSync(file)) rmSync(file);
-    }
-  });
+  // qmd keeps its index and collections under XDG_CACHE_HOME and XDG_CONFIG_HOME: a temp dir, never the user's.
+  const xdg = mkdtempSync(join(tmpdir(), 'qmd-xdg-'));
+  const env = { ...process.env, XDG_CACHE_HOME: join(xdg, 'cache'), XDG_CONFIG_HOME: join(xdg, 'config') };
+  const INDEX = `fjc-test-${process.pid}`;
+  afterAll(() => rmSync(xdg, { recursive: true, force: true }));
 
   it('builds the index and answers a cross-project search from it', async () => {
     const dir = config();
-    const index = qmdIndex(dir, { command: qmd!, name: INDEX, background: false });
+    const index = qmdIndex(dir, { command: qmd!, name: INDEX, background: false, env });
     const current = join(dir, 'projects', 'c--work-billing-api', 'none.jsonl');
     const out = await searchSessions(dir, current, 'jscpd baseline', 'all', 1, { index });
     expect(out).toMatch(/\(session index\)/);
     expect(out).toContain(`[billing-api · 2026-10-08 · "Add duplicate code gate" · ${ID}]`);
+    expect(existsSync(join(xdg, 'cache', 'qmd', `${INDEX}.sqlite`))).toBe(true);
+    expect(existsSync(join(homedir(), '.cache', 'qmd', `${INDEX}.sqlite`))).toBe(false);
   }, 120_000);
 });
