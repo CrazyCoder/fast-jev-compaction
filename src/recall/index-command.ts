@@ -11,6 +11,7 @@ import { projectCwd, projectName, projects, type Project } from './files.ts';
 import {
   builtAt,
   buildIndex,
+  exportSessions,
   hasScope,
   indexFile,
   lockBuild,
@@ -100,7 +101,7 @@ function size(path: string): string {
   }
 }
 
-/** Sessions exported per covered project. */
+/** How many sessions are exported, across the covered projects. */
 function exportedSessions(configDir: string): number {
   const root = sessionsDir(configDir);
   if (!existsSync(root)) return 0;
@@ -148,9 +149,8 @@ export async function runIndexCommand({ configDir, sessionId, args, command, nam
     return `Removed the session index: the exported sessions, the "${name}" qmd index and its collection. A cross-session search builds it again for all projects, unless you run /recall-index first.`;
   }
 
-  const { matched, unmatched } = targets.some((t) => t.toLowerCase() === 'all')
-    ? { matched: [...all], unmatched: [] as string[] }
-    : matchProjects(all, targets, currentSlug);
+  const every = targets.some((t) => t.toLowerCase() === 'all');
+  const { matched, unmatched } = every ? { matched: [...all], unmatched: [] as string[] } : matchProjects(all, targets, currentSlug);
   const missed = unmatched.length > 0 ? `No project matches ${unmatched.map((t) => `"${t}"`).join(', ')}.` : '';
   if (matched.length === 0) return `${missed}\n${USAGE}`.trim();
 
@@ -164,12 +164,14 @@ export async function runIndexCommand({ configDir, sessionId, args, command, nam
       } finally {
         unlockBuild(configDir, name);
       }
+    } else {
+      // No qmd, or a build running: the removed projects' exports go now, the index catches up on its next update.
+      await exportSessions(configDir, undefined, kept);
     }
     return [`Removed ${names(matched)} from the session index. ${covers(kept, all)}`, missed].filter(Boolean).join('\n');
   }
 
   if (!command) return INSTALL;
-  const every = targets.some((t) => t.toLowerCase() === 'all');
   // An index that covers all projects, chosen or built that way by a search, keeps covering all of them.
   const coversAll = scope === 'all' && (chosen || built !== undefined);
   const next: IndexScope =

@@ -115,6 +115,14 @@ describe('runIndexCommand', () => {
     expect(await run(dir, '')).toMatch(/No session index yet/);
   });
 
+  it('drops a removed project\'s exports even when it cannot rebuild the index', async () => {
+    const dir = config();
+    await run(dir, 'all');
+    const out = await runIndexCommand({ configDir: dir, sessionId: CURRENT, args: 'remove tool', command: undefined, name: 'fake', env: process.env });
+    expect(out).toMatch(/Removed tool/);
+    expect(exported(dir)).toEqual(['-home-me-notes', 'C--work-app', 'C--work-billing-api']);
+  });
+
   it('names what matched nothing and builds nothing for it', async () => {
     const dir = config();
     expect(await run(dir, 'nothing-here')).toMatch(/No project matches "nothing-here"/);

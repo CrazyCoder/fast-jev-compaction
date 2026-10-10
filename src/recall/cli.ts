@@ -1,7 +1,8 @@
 /**
  * Answers one recall request from the session transcript. Run by the pinned
  * Node of tools/node.cmd (Node strips the types): the request comes as JSON on
- * stdin, `{ configDir, sessionId, request }`, and the answer goes to stdout.
+ * stdin (CliInput: a recall `request`, or the arguments of `/recall-index`),
+ * and the answer goes to stdout.
  * Node reads the transcript at any size, which a hook's `$.fs.read` cannot.
  */
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
@@ -60,11 +61,6 @@ function sessionAgents(sessionDir: string): Agent[] {
   return agents;
 }
 
-/**
- * Every agent's entries, labelled with its name and numbered on from `after`,
- * the session's own count: an entry keeps its number whichever agents a
- * request picks.
- */
 /** Numbers of one subagent's entries start at a multiple of this, past any session's own. */
 const AGENT_NUMBER_BASE = 100_000;
 

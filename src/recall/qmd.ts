@@ -1,13 +1,15 @@
 /**
  * A qmd index of past sessions, for the cross-session search when qmd is
- * installed. Each transcript is exported as markdown to
+ * installed. Each transcript of the projects the index covers (all, unless
+ * `/recall-index` chose some) is exported as markdown to
  * `<config>/fast-jev-compaction/sessions/<project>/<session>.md` (prompts,
  * replies, and each call with the head of its result), and indexed in a qmd
  * index of its own, `fast-jev-sessions`, apart from the user's default one.
  *
  * The first search starts building the index in the background and is
  * answered by the transcript scan; later searches export the sessions that
- * changed, update the index, and search it.
+ * changed, update the index, and search it. `/recall-index` builds it on
+ * demand (index-command.ts).
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
