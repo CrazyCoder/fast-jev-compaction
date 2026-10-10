@@ -282,16 +282,21 @@ describe('post-compaction target', () => {
 });
 
 describe('session message mapping', () => {
-  it('returns the engine objects for untouched messages and handle-less copies for rebuilt ones', () => {
-    const messages = transcript();
+  /** Maps `messages` after dropping the first call's result and keeping the second call whole. */
+  function dropFirstResult(messages: SessionMessage[]) {
     const calls = collectToolCalls(messages, 0);
     const decisions = [
       decideCall(calls[0]!, { keepCall: 0.9, keepResult: 0.1 }, { keepThreshold: 0.5 }),
       decideCall(calls[1]!, { keepCall: 0.9, keepResult: 0.9 }, { keepThreshold: 0.5 }),
     ];
+    return toSessionMessages(messages, applyDecisions(messages, decisions, calls, 300));
+  }
+
+  it('returns the engine objects for untouched messages and handle-less copies for rebuilt ones', () => {
+    const messages = transcript();
     messages[1]!.toolUses[0]!.text = 'x'.repeat(2000);
     messages[2]!.toolResults![0]!.text = 'x'.repeat(2000);
-    const out = toSessionMessages(messages, applyDecisions(messages, decisions, calls, 300));
+    const out = dropFirstResult(messages);
     expect(out).toHaveLength(messages.length);
     expect(out[0]).toBe(messages[0]);
     expect(out[1]?.handle).toBeUndefined();
@@ -311,12 +316,7 @@ describe('session message mapping', () => {
     const messages = transcript();
     messages[1]!.toolUses[0]!.text = 'y'.repeat(100);
     messages[2]!.toolResults![0]!.text = 'y'.repeat(100);
-    const calls = collectToolCalls(messages, 0);
-    const decisions = [
-      decideCall(calls[0]!, { keepCall: 0.9, keepResult: 0.1 }, { keepThreshold: 0.5 }),
-      decideCall(calls[1]!, { keepCall: 0.9, keepResult: 0.9 }, { keepThreshold: 0.5 }),
-    ];
-    const out = toSessionMessages(messages, applyDecisions(messages, decisions, calls, 300));
+    const out = dropFirstResult(messages);
     expect(out[1]).toBe(messages[1]);
     expect(out[2]).toBe(messages[2]);
   });
@@ -390,16 +390,28 @@ describe('compactSession', () => {
 });
 
 describe('registered compaction hooks', () => {
+  /** A host whose every call is a spy, for checking what the hook never calls. */
+  const spyHost = () => ({
+    env: { get: vi.fn() },
+    settings: { read: vi.fn() },
+    http: { fetch: vi.fn() },
+    ui: { log: vi.fn(), toast: vi.fn() },
+  });
+
+  /** The turn.complete hook with spied usage, compact and next. */
+  function turnHook(options: Record<string, unknown>, usage: ReturnType<typeof vi.fn>) {
+    const handler = registeredHooks(options).get('turn.complete')!;
+    const compact = vi.fn(async () => ({}));
+    const next = vi.fn(async (event) => event);
+    const host = { session: { usage, compact }, ui: { log: vi.fn() } };
+    return { handler, usage, compact, next, host };
+  }
+
   it('does not send speculative precompute transcripts to Jev', async () => {
     const hooks = registeredHooks();
     const handler = hooks.get('session.compact')!;
     const next = vi.fn(async (event) => event);
-    const host = {
-      env: { get: vi.fn() },
-      settings: { read: vi.fn() },
-      http: { fetch: vi.fn() },
-      ui: { log: vi.fn(), toast: vi.fn() },
-    };
+    const host = spyHost();
     const event = { trigger: 'precompute', messages: [] };
 
     const result = await handler(host, event, next);
@@ -413,12 +425,7 @@ describe('registered compaction hooks', () => {
     const hooks = registeredHooks();
     const handler = hooks.get('session.compact')!;
     const next = vi.fn(async (event) => ({ messages: event.messages }));
-    const host = {
-      env: { get: vi.fn() },
-      settings: { read: vi.fn() },
-      http: { fetch: vi.fn() },
-      ui: { log: vi.fn(), toast: vi.fn() },
-    };
+    const host = spyHost();
     const events = [
       { trigger: 'manual', agentId: 'agent-1', messages: [] },
       { trigger: 'precompute', agentId: 'fork-1', messages: [] },
@@ -432,12 +439,10 @@ describe('registered compaction hooks', () => {
   });
 
   it('only auto-compacts completed main-agent answers', async () => {
-    const hooks = registeredHooks({ compactAtPercent: 1 });
-    const handler = hooks.get('turn.complete')!;
-    const usage = vi.fn(async () => ({ context: { percent: 100 } }));
-    const compact = vi.fn(async () => ({}));
-    const next = vi.fn(async (event) => event);
-    const host = { session: { usage, compact }, ui: { log: vi.fn() } };
+    const { handler, usage, compact, next, host } = turnHook(
+      { compactAtPercent: 1 },
+      vi.fn(async () => ({ context: { percent: 100 } })),
+    );
 
     for (const event of [
       turnComplete({ reason: 'aborted', isAborted: true }),
@@ -454,13 +459,11 @@ describe('registered compaction hooks', () => {
   });
 
   it('auto-compacts a main-session answer when usage reaches the configured threshold', async () => {
-    const hooks = registeredHooks({ compactAtPercent: 60 });
-    const handler = hooks.get('turn.complete')!;
     const event = turnComplete();
-    const usage = vi.fn(async () => ({ context: { percent: 75 } }));
-    const compact = vi.fn(async () => ({}));
-    const next = vi.fn(async (received) => received);
-    const host = { session: { usage, compact }, ui: { log: vi.fn() } };
+    const { handler, usage, compact, next, host } = turnHook(
+      { compactAtPercent: 60 },
+      vi.fn(async () => ({ context: { percent: 75 } })),
+    );
 
     const result = await handler(host, event, next);
 
@@ -471,14 +474,12 @@ describe('registered compaction hooks', () => {
   });
 
   it('claims the auto-compaction guard before awaiting usage and releases it after completion', async () => {
-    const hooks = registeredHooks({ compactAtPercent: 60 });
-    const handler = hooks.get('turn.complete')!;
     const firstUsage = deferred<{ context: { percent: number } }>();
     const secondUsage = deferred<{ context: { percent: number } }>();
-    const usage = vi.fn().mockReturnValueOnce(firstUsage.promise).mockReturnValueOnce(secondUsage.promise);
-    const compact = vi.fn(async () => ({}));
-    const next = vi.fn(async (event) => event);
-    const host = { session: { usage, compact }, ui: { log: vi.fn() } };
+    const { handler, usage, compact, next, host } = turnHook(
+      { compactAtPercent: 60 },
+      vi.fn().mockReturnValueOnce(firstUsage.promise).mockReturnValueOnce(secondUsage.promise),
+    );
 
     const first = handler(host, turnComplete(), next);
     const concurrent = handler(host, turnComplete({ turnId: 'turn-2' }), next);
