@@ -283,7 +283,8 @@ to, and never on every prompt:
   before running a tool again or saying something earlier is gone, with an
   assistant acknowledgement. Each compaction replaces it, so there is only ever
   one; a compaction that cut nothing writes none. It is part of the
-  conversation, so it survives a restart and `--resume`.
+  conversation, so it survives a restart and `--resume`, until Claude Code's
+  built-in summary replaces the history.
 
 ### `/recall-index`
 
