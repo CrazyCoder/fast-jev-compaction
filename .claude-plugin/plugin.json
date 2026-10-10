@@ -127,8 +127,7 @@
     "truncateHeadChars": {
       "type": "number",
       "title": "Truncated tool result head",
-      "description": "Characters of a tool result kept when Jev decides its full output is no longer needed; 0 keeps only the note.",
-      "default": 300
+      "description": "Characters of a tool result kept when Jev decides its full output is no longer needed; 0 keeps only the note. Unset: 100 with `recall` on, 300 with it off."
     },
     "trimHostText": {
       "type": "boolean",
@@ -151,8 +150,7 @@
     "oldProse": {
       "type": "string",
       "title": "Old prose",
-      "description": "What becomes of user and assistant prose older than the last `recentTurns` user turns: `keep` (verbatim, default), `digest` (deterministic extractive digest) or `summarize` (summary written by `proseModel`, falling back to the digest).",
-      "default": "keep"
+      "description": "What becomes of user and assistant prose older than the last `recentTurns` user turns: `keep` (verbatim), `digest` (deterministic extractive digest) or `summarize` (summary written by `proseModel`, falling back to the digest). Unset: `digest` with `recall` on, which can read the originals back; `keep` with it off."
     },
     "recentTurns": {
       "type": "number",

@@ -49,6 +49,16 @@ const HOOK_DEFAULTS = {
 };
 
 /**
+ * Library options that change when recall is on. Replaying a long session
+ * through repeated compactions, verbatim old prose let the context left after
+ * each one climb until compaction was refused; the digest kept it bounded.
+ */
+const RECALL_DEFAULTS = {
+  oldProse: 'digest' as const,
+  truncateHeadChars: 100,
+};
+
+/**
  * Percentage points the context must grow by after a skipped `turn.complete`
  * request before the next one, so a conversation with nothing left to prune
  * is not re-scored after every turn.
@@ -180,6 +190,12 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     proseModel: optionString(options, 'proseModel') ?? HOOK_DEFAULTS.proseModel,
   };
   if (config.compactionTimeoutMs <= 0) config.compactionTimeoutMs = HOOK_DEFAULTS.compactionTimeoutMs;
+  // With recall the model can read back what the digest and short heads cut,
+  // and verbatim old prose is what makes each compaction end higher than the last.
+  if (config.recall) {
+    config.oldProse ??= RECALL_DEFAULTS.oldProse;
+    config.truncateHeadChars ??= RECALL_DEFAULTS.truncateHeadChars;
+  }
   // `apiKey` and `baseUrl` belong to Jev: with openai they are ignored, so a
   // TypeSafe key or a Jev gateway never receives an OpenAI request, and the
   // OpenAI key comes from OPENAI_API_KEY alone.

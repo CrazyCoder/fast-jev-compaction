@@ -97,6 +97,8 @@ describe('hook config', () => {
       provider: 'jev',
       recall: true,
       sessionIndex: 'auto',
+      oldProse: 'digest',
+      truncateHeadChars: 100,
       compactAtPercent: 60,
       minReductionRatio: 0.25,
       targetPercent: 45,
@@ -119,6 +121,8 @@ describe('hook config', () => {
       provider: 'jev',
       recall: true,
       sessionIndex: 'auto',
+      oldProse: 'digest',
+      truncateHeadChars: 100,
       apiKey: 'k',
       keepThreshold: 0.3,
       maxStateTokens: 1000,
@@ -130,6 +134,14 @@ describe('hook config', () => {
       builtinFallback: 'auto',
       proseModel: 'haiku',
       targetPercent: 45,
+    });
+    // Recall can read back what the digest and short heads cut; without it they stay as the library has them.
+    const off = resolveHookConfig({ recall: false });
+    expect(off.oldProse).toBeUndefined();
+    expect(off.truncateHeadChars).toBeUndefined();
+    expect(resolveHookConfig({ oldProse: 'keep', truncateHeadChars: 300 })).toMatchObject({
+      oldProse: 'keep',
+      truncateHeadChars: 300,
     });
     expect(resolveHookConfig({ keepMode: 'threshold', targetPercent: 30, keepResultTokens: 5 })).toMatchObject({
       keepMode: 'threshold',
@@ -147,7 +159,8 @@ describe('hook config', () => {
       recentTurns: 5,
       proseModel: 'sonnet',
     });
-    expect(resolveHookConfig({ oldProse: 'maybe', recentTurns: 'x' })).not.toHaveProperty('oldProse');
+    expect(resolveHookConfig({ oldProse: 'maybe', recentTurns: 'x' }).oldProse).toBe('digest');
+    expect(resolveHookConfig({ oldProse: 'maybe', recall: false })).not.toHaveProperty('oldProse');
     expect(resolveHookConfig({})).not.toHaveProperty('recentTurns');
   });
 

@@ -27,10 +27,13 @@ k-metehan is
 [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction).
 
 On a replay of real sessions, `oldProse: digest` with `recentTurns: 8` versus
-the default `keep` took the post-compaction floor from about 155k to about 39k
-tokens, the growth per compaction from +21k to −5k, and the lost-and-needed rate
-from 1.0% to 1.7%. `oldProse` still defaults to `keep`; set it to `digest` to
-opt in (see [Configure](#configure)).
+`keep` took the post-compaction floor from about 155k to about 39k tokens, the
+growth per compaction from +21k to −5k, and the lost-and-needed rate from 1.0%
+to 1.7%. Replaying one 3,400-message session through 21 compactions, verbatim
+prose let the context left after each one climb from 11% to 39% until compaction
+was refused; `digest` with a 100-character head kept it between 9% and 18%. With
+`recall` on, which reads the originals back, those are the defaults; with it
+off, `oldProse` stays `keep` and the head 300 (see [Configure](#configure)).
 
 ## Install
 
@@ -98,7 +101,7 @@ people touch:
 | Option | Default | Effect |
 | -- | -- | -- |
 | `compactAtPercent` | `60` | Context percentage at which the plugin asks for a compaction |
-| `oldProse` | `keep` | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`) |
+| `oldProse` | `digest` with `recall` on, else `keep` | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`) |
 | `recentTurns` | `8` | User turns kept outside the digest or summary |
 | `builtinFallback` | `auto` | Which compactions fall back to Claude Code's built-in summary when Jev fails or frees too little: `auto` (only its own automatic one), `always`, `never`. Use `always` if Claude Code's own autoCompact is disabled, so `/compact` and plugin requests still get a summary |
 | `targetPercent` | `45` | Gives up the Jev result if the estimated context after compaction would still exceed this percentage |
