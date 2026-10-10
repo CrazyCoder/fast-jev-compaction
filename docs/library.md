@@ -1,6 +1,7 @@
 # Library usage
 
-The repository is also an npm package (`src/`). The Claude Code plugin in `hooks/` is a thin adapter over it.
+The repository is also an npm package (`src/`). The Claude Code plugin in
+`hooks/` is a thin adapter over it.
 
 ## Install and usage
 
@@ -35,24 +36,23 @@ can be passed in as is.
 
 To bring your own transport, implement `JevAsker` (one `ask(state, questions)`
 method) and call `compact(messages, asker, options)`; `buildJevRequest` and
-`parseJevResponse` give you the HTTP request body and response validation.
-The building blocks (`collectToolCalls`, `fitState`, `batchCalls`,
-`decideCall`, `applyDecisions`) are exported too.
+`parseJevResponse` give you the HTTP request body and response validation. The
+building blocks (`collectToolCalls`, `fitState`, `batchCalls`, `decideCall`,
+`applyDecisions`) are exported too.
 
-`apiKey` defaults to `process.env.TYPESAFE_API_KEY`. Never commit the key or
-put it in a source file.
+`apiKey` defaults to `process.env.TYPESAFE_API_KEY`. Never commit the key or put
+it in a source file.
 
 `baseUrl` picks the Jev endpoint. Left unset it is the TypeSafe one; the same
 Jev model is also served through OpenRouter, at
-`https://openrouter.ai/api/alpha/decisions`, with `model` left at
-`jev-latest` and an OpenRouter key in place of a TypeSafe one.
+`https://openrouter.ai/api/alpha/decisions`, with `model` left at `jev-latest`
+and an OpenRouter key in place of a TypeSafe one.
 
-`provider: 'openai'` on `compactMessages` or `JevClient` asks OpenAI's Decisions API
-(`https://api.openai.com/v1/decisions`, `gpt-6-luna`) instead: the state goes
-as text `input`, each `noul` question as a named `predicate`, and a refusal
+`provider: 'openai'` on `compactMessages` or `JevClient` asks OpenAI's Decisions
+API (`https://api.openai.com/v1/decisions`, `gpt-6-luna`) instead: the state
+goes as text `input`, each `noul` question as a named `predicate`, and a refusal
 answers 1 (keep). `buildDecisionsRequest`, `parseDecisionsResponse` and
-`wireFor(provider)` are the request and response halves for your own
-transport.
+`wireFor(provider)` are the request and response halves for your own transport.
 
 `hiddenContent(rows, apiView)` and `foldHiddenContent(messages, hidden)` are
 what the Claude Code hook uses to put back the hidden entries (skill bodies,
@@ -62,7 +62,7 @@ engine handle lose; see [hooks/README.md](../hooks/README.md).
 ## Options
 
 | Option | Default | Description |
-| --- | --- | --- |
+| -- | -- | -- |
 | `provider` | `jev` | `compactMessages`/`JevClient`: `jev` (System One) or `openai` (Decisions API) |
 | `apiKey` | `TYPESAFE_API_KEY` (`OPENAI_API_KEY` with `openai`) | Key (`compactMessages`/`JevClient`) |
 | `model` | `jev-latest` (`gpt-6-luna` with `openai`) | Model name |
@@ -87,11 +87,11 @@ engine handle lose; see [hooks/README.md](../hooks/README.md).
 | `taskResultHeadChars` | `4000` | Characters of a `<task-notification>`'s `<result>` (a subagent's final report) retained; its `task-id`, `status`, `summary`, `output-file` and `tool-use-id` always stay whole; `0` trims it like any host block |
 
 Plugin-only options (set as plugin options, see
-[`hooks/README.md`](../hooks/README.md)): `compactAtPercent` (60), `minReductionRatio`
-(0.25), `compactionTimeoutMs` (15000), `builtinFallback` (`auto`),
-`targetPercent` (45: above this estimated post-compaction context percentage,
-the Jev result is given up for the built-in summary on automatic compactions,
-or skipped otherwise), `envFile`.
+[`hooks/README.md`](../hooks/README.md)): `compactAtPercent` (60),
+`minReductionRatio` (0.25), `compactionTimeoutMs` (15000), `builtinFallback`
+(`auto`), `targetPercent` (45: above this estimated post-compaction context
+percentage, the Jev result is given up for the built-in summary on automatic
+compactions, or skipped otherwise), `envFile`.
 
 `result.stats` reports message and character counts before and after, the
 per-reason decision counts, the state size in estimated tokens, which fitting
@@ -99,14 +99,13 @@ stage was needed, and the number of requests.
 
 ## Limitations
 
-- Only tool calls and results are candidates; text messages are never removed
-  or shortened in the output (they are only abridged in the state Jev sees).
+- Only tool calls and results are candidates; text messages are never removed or
+  shortened in the output (they are only abridged in the state Jev sees).
 - Token sizes are estimates from character counts, not a tokenizer.
 - Calibration is at the request level; a probability is not a proof that a
   result is safe to delete. The assistant can always re-run the tool.
 - The full state is repeated with every request, so a history near the state
   ceiling costs one request per handful of questions.
-
 
 ## Algorithm in detail
 
@@ -121,14 +120,14 @@ stage was needed, and the number of requests.
    1000, then 200, then 60 characters; long texts abridged to head + tail,
    oldest non-pinned messages first; old non-pinned messages collapsed to a
    `[… N chars omitted …]` note; old tool calls reduced to one line each
-   (`t12 Read file_path=src/a.ts → ok 480ch`); old call-less messages left
-   out; runs of old call-only messages folded into one entry. If it still
-   does not fit (long sessions), the calls are asked in contiguous windows,
-   halved until each window's state fits: a window keeps the goal, the first
-   message, the pinned newest messages and its own messages in full. A call
-   whose window cannot fit even alone is not asked, so it stays. Tokens are estimated without a tokenizer (a
-   word per six letters, half a token per digit, ~one per other symbol),
-   calibrated to land a little above the counts Jev reports.
+   (`t12 Read file_path=src/a.ts → ok 480ch`); old call-less messages left out;
+   runs of old call-only messages folded into one entry. If it still does not
+   fit (long sessions), the calls are asked in contiguous windows, halved until
+   each window's state fits: a window keeps the goal, the first message, the
+   pinned newest messages and its own messages in full. A call whose window
+   cannot fit even alone is not asked, so it stays. Tokens are estimated without
+   a tokenizer (a word per six letters, half a token per digit, ~one per other
+   symbol), calibrated to land a little above the counts Jev reports.
 4. For every non-pinned call Jev gets two `noul` questions: should the **call**
    stay (knowing it was made, with its input, still matters), and should the
    **result** stay verbatim (its contents are still needed and re-running the
@@ -143,19 +142,18 @@ stage was needed, and the number of requests.
    request that still failed are kept and counted in `stats.requestsFailed`.
 6. Decisions per call. Jev's scores are compressed (keepCall rarely exceeds
    0.3), so the default `rank` mode ranks them instead of applying an absolute
-   threshold: results are kept verbatim best-`keepResult`
-   first within `keepResultTokens`, then the best-`keepCall` of the rest keep
-   their input and a truncated result within `keepCallTokens`, the rest are
-   removed (ties go to the more recent call). In `threshold` mode, against
-   `keepThreshold`:
+   threshold: results are kept verbatim best-`keepResult` first within
+   `keepResultTokens`, then the best-`keepCall` of the rest keep their input and
+   a truncated result within `keepCallTokens`, the rest are removed (ties go to
+   the more recent call). In `threshold` mode, against `keepThreshold`:
    - `keepResult ≥ threshold` → keep call and result;
    - else `keepCall ≥ threshold` → keep the call, truncate the result to its
      first `truncateHeadChars` characters plus a one-line note;
    - else → remove the call together with its result.
-7. The message list is rebuilt: a message that loses all its content is
-   removed, untouched messages are returned as the same objects, and no result
-   is ever left without its call.
+7. The message list is rebuilt: a message that loses all its content is removed,
+   untouched messages are returned as the same objects, and no result is ever
+   left without its call.
 
 A missing key, or Jev failing every request (an error, a malformed answer),
-throws; the caller (or the Claude Code hook) decides what to fall back to.
-When only some requests fail, their calls are kept and the rest is applied.
+throws; the caller (or the Claude Code hook) decides what to fall back to. When
+only some requests fail, their calls are kept and the rest is applied.

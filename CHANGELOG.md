@@ -9,9 +9,10 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
 
 ### Added
 
-- Each compaction outcome, and each `/compact` queued in a headless session,
-  is appended as one line to `<CLAUDE_CONFIG_DIR or ~/.claude>/fast-jev-compaction/compactions.log`
-  (newest 200 lines).
+- Each compaction outcome, and each `/compact` queued in a headless session, is
+  appended as one line to
+  `<CLAUDE_CONFIG_DIR or ~/.claude>/fast-jev-compaction/compactions.log` (newest
+  200 lines).
 - Hidden content (skill bodies, prompts typed while a tool ran, attachments,
   images and ToolSearch-loaded tools) is read from the conversation's API form
   and folded back as text into the handle-stripped rows; images and deferred
@@ -97,9 +98,9 @@ Changes relative to ferrisworks 0.5.4, the base of this fork.
   token budgets instead of applying an absolute threshold, which kept 0 calls on
   measured sessions because Jev scores are compressed. `keepMode: 'threshold'`
   restores the previous behavior.
-- `targetPercent` (default 45): when the estimated context after compaction would
-  still exceed this percentage of the window, the Jev result is given up (built-in
-  summary on automatic compactions, skipped otherwise).
+- `targetPercent` (default 45): when the estimated context after compaction
+  would still exceed this percentage of the window, the Jev result is given up
+  (built-in summary on automatic compactions, skipped otherwise).
 - Regression test for headless sessions (upstream PR #125).
 - Surrogate pairs kept whole when cutting text for the Jev state, plus a request
   backstop for lone surrogates (upstream PR #132).
