@@ -410,6 +410,14 @@ describe('decisions', () => {
     );
   });
 
+  it('gives a cut recall answer the plain note: recall cannot expand its own calls', () => {
+    const messages = transcript();
+    messages[1]!.toolUses[0]!.tool = 'mcp__fast-jev-compaction__recall';
+    const calls = collectToolCalls(messages, 0);
+    const cut = [decideCall(calls[0]!, { keepCall: 0.9, keepResult: 0.1 }, { keepThreshold: 0.5 })];
+    expect(applyDecisions(messages, cut, calls, 50, true)[2]?.toolResults?.[0]?.text).toMatch(/; re-run the tool if needed\]$/);
+  });
+
   it('never cuts the head of a dropped result inside a surrogate pair', () => {
     const emoji = '\u{1F600}';
     const note = (omitted: number): string =>

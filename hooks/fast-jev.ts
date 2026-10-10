@@ -615,15 +615,20 @@ function recallFs($: RecallHost) {
   };
 }
 
-/** Saves the rows a compaction received for the recall tool, before anything is cut; never throws. */
-async function archiveForRecall($: RecallHost, rows: readonly SessionMessage[]): Promise<void> {
+/**
+ * Saves the rows a compaction received for the recall tool, before anything is
+ * cut. Returns whether they are in the archive; never throws.
+ */
+async function archiveForRecall($: RecallHost, rows: readonly SessionMessage[]): Promise<boolean> {
   try {
     const base = await configDir($);
-    if (!base) return;
+    if (!base) return false;
     const saved = await archiveSession(recallFs($), base, await $.session.id(), rows);
     if (saved.rows > 0) debugLog($, `recall: archived ${saved.rows} row(s) in ${saved.files} file(s)`);
+    return true;
   } catch (error) {
     debugLog($, `recall: archive not written (${error instanceof Error ? error.message : String(error)})`);
+    return false;
   }
 }
 
@@ -631,18 +636,22 @@ export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
   let compacting = false;
   let retryAtPercent = 0;
-  if (configured.recall) {
-    on('session.start', async ($, event, next) => {
-      const started = await next(event);
-      try {
+  // Old archives are emptied with recall off too: turning it off must not keep them for good.
+  on('session.start', async ($, event, next) => {
+    const started = await next(event);
+    try {
+      if (configured.recall) {
         await $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA });
-        const base = await configDir($);
-        if (base) void pruneArchives(recallFs($), base, Date.now(), RECALL_MAX_AGE_MS).catch(() => undefined);
-      } catch (error) {
-        debugLog($, `recall: tool not registered (${error instanceof Error ? error.message : String(error)})`);
       }
-      return started;
-    });
+      const base = await configDir($);
+      const current = await $.session.id();
+      if (base) void pruneArchives(recallFs($), base, Date.now(), RECALL_MAX_AGE_MS, current).catch(() => undefined);
+    } catch (error) {
+      debugLog($, `recall: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return started;
+  });
+  if (configured.recall) {
     // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
     on('tool.call', { tool: 'mcp__fast-jev-compaction__recall' }, async ($, e) => {
       try {
@@ -660,8 +669,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
     if (event.trigger === 'precompute') {
       return { skip: 'fast-jev-compaction does not handle speculative compactions' };
     }
-    // What this compaction may cut stays reachable through the recall tool.
-    if (configured.recall) await archiveForRecall($, event.messages);
+    // What this compaction may cut stays reachable through the recall tool;
+    // cut notes point there only when the archive holds it.
+    const archived = configured.recall && (await archiveForRecall($, event.messages));
 
     const giveUp = async (why: string) => {
       if (mayUseBuiltin(event.trigger, configured.builtinFallback)) {
@@ -674,7 +684,12 @@ export const register: Register = (on: On, options: PluginOptions) => {
     };
     try {
       // `/compact <instructions>`: what the user wants kept, for Jev's goal.
-      const config = { ...configured, apiKey: await getApiKey($, configured), instructions: event.instructions };
+      const config = {
+        ...configured,
+        recall: archived,
+        apiKey: await getApiKey($, configured),
+        instructions: event.instructions,
+      };
       let redacted = 0;
       const { result, messages } = await withCompactionDeadline(
         () =>

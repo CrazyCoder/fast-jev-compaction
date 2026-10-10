@@ -1,5 +1,6 @@
 import { trimHostText } from './host-text.js';
 import { condenseOldProse, DEFAULT_RECENT_TURNS, type ProseSummarizer } from './prose.js';
+import { RECALL_TOOL } from './recall/recall.js';
 import { isRetryable, noulAnswer, stopsAll } from './request.js';
 import {
   collectToolCalls,
@@ -375,6 +376,8 @@ export function applyDecisions(
   recallNotes = false,
 ): Message[] {
   const byId = new Map(calls.map((call) => [call.id, call]));
+  // Recall cannot expand its own calls, so their cut notes stay plain.
+  const pointsToRecall = (id: string) => recallNotes && !calls.some((c) => c.tool_use_id === id && c.tool === RECALL_TOOL);
   const actions = new Map<string, CallDecision['action']>();
   for (const decision of decisions) {
     const call = byId.get(decision.id);
@@ -401,9 +404,9 @@ export function applyDecisions(
       .map((tool) => {
         const action = actions.get(tool.tool_use_id);
         if (action !== 'drop_result' && action !== 'stub_call') return tool;
-        const text = truncatedResultText(tool.text ?? '', tool.isError ?? false, headChars, tool.tool_use_id, recallNotes);
-        const input =
-          action === 'stub_call' ? truncatedInput(tool.input, headChars, tool.tool_use_id, recallNotes) : tool.input;
+        const recall = pointsToRecall(tool.tool_use_id);
+        const text = truncatedResultText(tool.text ?? '', tool.isError ?? false, headChars, tool.tool_use_id, recall);
+        const input = action === 'stub_call' ? truncatedInput(tool.input, headChars, tool.tool_use_id, recall) : tool.input;
         if ((tool.text ?? '') === text && input === tool.input) return tool;
         const copy: ToolUse = {
           tool_use_id: tool.tool_use_id,
@@ -419,7 +422,13 @@ export function applyDecisions(
       .map((result) => {
         const action = actions.get(result.tool_use_id);
         if (action !== 'drop_result' && action !== 'stub_call') return result;
-        const text = truncatedResultText(result.text, result.isError ?? false, headChars, result.tool_use_id, recallNotes);
+        const text = truncatedResultText(
+          result.text,
+          result.isError ?? false,
+          headChars,
+          result.tool_use_id,
+          pointsToRecall(result.tool_use_id),
+        );
         return text === result.text
           ? result
           : {

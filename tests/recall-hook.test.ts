@@ -100,16 +100,39 @@ describe('recall in the hook', () => {
     }
   });
 
-  it('writes cut notes that name the recall call', async () => {
-    const { $ } = host([], cutAll);
+  /** The build result's text after a compaction in which Jev cuts every result. */
+  async function cutResult($: ReturnType<typeof host>['$']): Promise<string> {
     const rows = [...transcript(), userRow('ok'), { role: 'assistant', text: 'Done.', toolUses: [] }];
     const out = (await hooks({ preserveRecentMessages: 1, keepMode: 'threshold' })['session.compact']!(
       $,
       { trigger: 'manual', messages: rows },
       async () => ({}),
     )) as { messages: { toolResults?: { text: string }[] }[] };
-    const cut = out.messages.flatMap((m) => m.toolResults ?? [])[0]!.text;
-    expect(cut).toMatch(/; full text: recall expand \["toolu_build"\]\]$/);
+    return out.messages.flatMap((m) => m.toolResults ?? [])[0]!.text;
+  }
+
+  it('writes cut notes that name the recall call', async () => {
+    expect(await cutResult(host([], cutAll).$)).toMatch(/; full text: recall expand \["toolu_build"\]\]$/);
+  });
+
+  it('tells the model to run the tool again when the archive could not be written', async () => {
+    const { $ } = host([], cutAll);
+    $.fs.write = async () => {
+      throw new Error('EACCES');
+    };
+    expect(await cutResult($)).toMatch(/; re-run the tool if needed\]$/);
+  });
+
+  it('empties old archives at session start, the current session\'s and recall: false aside', async () => {
+    for (const recall of [true, false]) {
+      const { $, files } = host();
+      const old = (id: string) => `/home/me/.claude/fast-jev-compaction/recall/${id}/000001-001.json`;
+      files.set(old('sess-1'), { text: '[]', mtimeMs: 0 });
+      files.set(old('other'), { text: '[]', mtimeMs: 0 });
+      await hooks({ recall })['session.start']!($, {}, async () => ({ cwd: '.' }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect([files.get(old('sess-1'))!.text, files.get(old('other'))!.text], `recall: ${recall}`).toEqual(['[]', '']);
+    }
   });
 
   it('does nothing with recall: false', async () => {

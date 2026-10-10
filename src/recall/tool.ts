@@ -26,7 +26,7 @@ export const RECALL_DESCRIPTION = [
   '- expand: ["#N" or a tool_use_id, ...]: those entries in full, a call with its input and result.',
   '- range: [from, to]: entries #from..#to in order, one line each.',
   'Add page for more query or range results, and offset to continue a long expand.',
-  'A compaction note names the tool_use_id to expand.',
+  'A compaction note names the tool_use_id to expand. A tool_use_id always names the same call; #N can shift as the session grows.',
 ].join('\n');
 
 export const RECALL_INPUT_SCHEMA = {
