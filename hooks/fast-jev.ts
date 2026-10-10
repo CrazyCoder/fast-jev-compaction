@@ -628,8 +628,32 @@ export const register: Register = (on: On, options: PluginOptions) => {
       );
       debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
       for (const line of decisionLogLines(result)) debugLog($, line);
-      if (reductionRatio(result) < config.minReductionRatio) {
-        return giveUp(`below ${percent(config.minReductionRatio)} minimum: ${summarize(result)}`);
+      // Rows go back without handles, which costs them their hidden content:
+      // read it from the API form and fold it back in as text, before the
+      // size guards so they measure what is returned. Content after a result
+      // Jev cut is cut the same way.
+      let returned = messages;
+      let measured = result;
+      let hiddenNote = '';
+      try {
+        const view = await $.session.messages({ as: 'api' });
+        const cutIds = new Set(
+          result.decisions.filter((d) => d.action !== 'keep' && d.reason !== 'pinned').map((d) => d.id),
+        );
+        const fold = foldHiddenContent(messages, hiddenContent(event.messages, view as ApiMessage[]), {
+          cutIds,
+          headChars: resolveOptions(config).truncateHeadChars,
+        });
+        returned = fold.messages;
+        measured = { ...result, stats: { ...result.stats, charsAfter: result.stats.charsAfter + fold.chars } };
+        hiddenNote = `; hidden content: ${fold.folded} folded back (${fold.chars} chars)${
+          fold.lost > 0 ? `, ${fold.lost} lost` : ''
+        }`;
+      } catch (error) {
+        hiddenNote = `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
+      }
+      if (reductionRatio(measured) < config.minReductionRatio) {
+        return giveUp(`below ${percent(config.minReductionRatio)} minimum: ${summarize(measured)}${hiddenNote}`);
       }
       let percentBefore: number | undefined;
       try {
@@ -637,37 +661,22 @@ export const register: Register = (on: On, options: PluginOptions) => {
       } catch {
         percentBefore = undefined;
       }
-      const estimate = estimatePostCompactPercent(percentBefore, result.stats);
+      const estimate = estimatePostCompactPercent(percentBefore, measured.stats);
       if (exceedsTarget(estimate, config.targetPercent)) {
         return giveUp(
-          `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target: ${summarize(result)}`,
+          `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target: ${summarize(measured)}${hiddenNote}`,
         );
-      }
-      // Rows go back without handles, which costs them their hidden content:
-      // read it from the API form and fold it back in as text.
-      let returned = messages;
-      let hiddenNote = '';
-      try {
-        const view = await $.session.messages({ as: 'api' });
-        const hidden = hiddenContent(event.messages, view as ApiMessage[]);
-        const fold = foldHiddenContent(messages, hidden);
-        returned = fold.messages;
-        const chars = hidden.reduce((sum, piece) => sum + piece.text.length, 0);
-        hiddenNote = `; hidden content: ${fold.folded} folded back (${chars} chars, not in the reduction above)${
-          fold.lost > 0 ? `, ${fold.lost} lost` : ''
-        }`;
-      } catch (error) {
-        hiddenNote = `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
       }
       await notify(
         $,
         event.trigger,
-        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})${hiddenNote}`,
-        `compacted, ${percent(reductionRatio(result))} smaller (${messages.length}/${event.messages.length} messages)`,
+        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(measured)})${hiddenNote}`,
+        `compacted, ${percent(reductionRatio(measured))} smaller (${messages.length}/${event.messages.length} messages)`,
       );
       return { messages: withoutHandles(returned) };
     } catch (error) {
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
+        await notify($, event.trigger, `not compacted (${error.message})`, `not compacted (${toastReason(error.message)})`);
         return { skip: `fast-jev-compaction: ${error.message}; conversation left unchanged` };
       }
       return giveUp(error instanceof Error ? error.message : String(error));

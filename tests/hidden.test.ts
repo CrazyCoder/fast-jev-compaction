@@ -167,6 +167,20 @@ describe('hidden content', () => {
     expect(rows[2]!.toolResults![0]!.text).toBe('Launching skill: probe');
   });
 
+  it('cuts content attached to a result compaction cut, and reports the characters it adds', () => {
+    const { rows, api } = session();
+    const hidden = hiddenContent(rows, api);
+    const long = { anchor: { toolUseId: 's1' }, text: 'x'.repeat(1000) };
+    const out = foldHiddenContent(rows, [long, ...hidden.slice(1)], { cutIds: new Set(['s1']), headChars: 50 });
+    const s1 = out.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 's1')!;
+    expect(s1.text).toBe(
+      `Launching skill: probe\n\n${'x'.repeat(50)}\n[fast-jev-compaction cut 950 chars of content attached here]`,
+    );
+    const before = rows.reduce((sum, m) => sum + m.text.length + (m.toolResults ?? []).reduce((s, r) => s + r.text.length, 0), 0);
+    const after = out.messages.reduce((sum, m) => sum + m.text.length + (m.toolResults ?? []).reduce((s, r) => s + r.text.length, 0), 0);
+    expect(out.chars).toBe(after - before);
+  });
+
   it('moves content whose result was removed to the nearest earlier kept result, and counts what has nowhere to go', () => {
     const { rows, api } = session();
     const hidden = hiddenContent(rows, api);

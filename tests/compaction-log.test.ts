@@ -82,7 +82,7 @@ describe('Jev transport through the hook', () => {
     const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
     (register as unknown as (on: unknown, options: unknown) => void)(
       (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
-      { preserveRecentMessages: 1, minReductionRatio: 0, targetPercent: 100 },
+      { preserveRecentMessages: 1, minReductionRatio: 0, targetPercent: 100, keepMode: 'threshold' },
     );
     const body = 'line\n'.repeat(200);
     const messages = [
@@ -127,6 +127,69 @@ describe('Jev transport through the hook', () => {
     const skill = out.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 's')!;
     expect(skill.text).toMatch(/\n\nSKILL BODY$/);
     expect(out.messages.every((m) => m.handle === undefined)).toBe(true);
+  });
+
+  it('measures the size guards after the fold', async () => {
+    const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
+    (register as unknown as (on: unknown, options: unknown) => void)(
+      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
+      { preserveRecentMessages: 1, minReductionRatio: 0 },
+    );
+    const messages = [
+      { role: 'user', text: 'go', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 's', tool: 'Skill', input: {} }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 's', text: 'Launching skill: x', isError: false }] },
+      { role: 'assistant', text: 'Done.', toolUses: [] },
+    ];
+    const api = [
+      { role: 'user', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 's' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 's', content: 'Launching skill: x' }, { type: 'text', text: 'BODY' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+    ];
+    const host = {
+      env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
+      settings: { read: async () => ({}) },
+      clock: { sleep: () => new Promise<void>(() => {}) },
+      ui: { log: () => {}, toast: () => {} },
+      session: { usage: async () => ({ context: {} }), messages: async () => api },
+      http: {
+        fetch: async (_url: string, init: { body: string }) => {
+          const { questions } = JSON.parse(init.body) as { questions: Record<string, unknown> };
+          const answers = Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul', noul: 0.99 }]));
+          return { status: 200, ok: true, text: JSON.stringify({ answers }) };
+        },
+      },
+    };
+    // Jev keeps everything (0% before the fold); the folded body makes it negative.
+    const out = await hooks['session.compact']!(host, { trigger: 'manual', messages }, async () => ({}));
+    expect(out).toEqual({ skip: expect.stringMatching(/below 0% minimum: -\d+% reduction.*hidden content: 1 folded back \(\d+ chars\)/) });
+  });
+
+  it('logs a plugin-triggered compaction that ran out of time', async () => {
+    const files = new Map<string, string>();
+    const { $ } = fsHost(files, { HOME: '/home/me', TYPESAFE_API_KEY: 'k' });
+    const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
+    (register as unknown as (on: unknown, options: unknown) => void)(
+      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
+      { preserveRecentMessages: 1 },
+    );
+    const body = 'line\n'.repeat(200);
+    const messages = [
+      { role: 'user', text: 'go', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Read', input: {} }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: body, isError: false }] },
+      { role: 'assistant', text: 'Done.', toolUses: [] },
+    ];
+    const host = {
+      ...$,
+      settings: { read: async () => ({}) },
+      clock: { sleep: async () => {} },
+      http: { fetch: () => new Promise(() => {}) },
+    };
+    const out = await hooks['session.compact']!(host, { trigger: 'plugin', messages }, async () => ({}));
+    expect(out).toEqual({ skip: expect.stringMatching(/conversation left unchanged$/) });
+    expect(linesOf(files)).toEqual([expect.stringMatching(/^\S+Z plugin not compacted \(/)]);
   });
 
   it('names failed requests in the outcome summary', () => {

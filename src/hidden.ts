@@ -1,3 +1,4 @@
+import { sliceSurrogateSafe } from './state.js';
 import type { Message } from './types.js';
 
 /**
@@ -187,13 +188,24 @@ function sameAnchor(a: HiddenAnchor, b: HiddenAnchor): boolean {
  * `messages`: a tool result's text, or a prompt row's text. A prompt row is
  * found by identity, else by its text. Content whose anchor is gone goes to
  * the nearest earlier result that was placed; with none, it is counted lost.
- * Messages that change are copies; the input is not modified.
+ * Content after a result in `cutIds` keeps its first `headChars` and a note.
+ * `chars` is what the fold added. Messages that change are copies; the input
+ * is not modified.
  */
 export function foldHiddenContent<M extends Message>(
   messages: readonly M[],
   hidden: readonly HiddenContent[],
-): { messages: M[]; folded: number; lost: number } {
+  options: { cutIds?: ReadonlySet<string>; headChars?: number } = {},
+): { messages: M[]; folded: number; lost: number; chars: number } {
   const out = [...messages];
+  let chars = 0;
+  // Content after a result the compaction cut is cut the same way.
+  const pieceOf = (anchor: HiddenAnchor, text: string): string => {
+    const head = options.headChars ?? 0;
+    if (!('toolUseId' in anchor) || !options.cutIds?.has(anchor.toolUseId) || text.length <= head + 120) return text;
+    const kept = sliceSurrogateSafe(text, 0, head);
+    return `${kept}\n[fast-jev-compaction cut ${text.length - kept.length} chars of content attached here]`;
+  };
   const where = new Map<string, number>();
   out.forEach((message, index) => {
     for (const result of message.toolResults ?? []) where.set(result.tool_use_id, index);
@@ -210,6 +222,7 @@ export function foldHiddenContent<M extends Message>(
     return index;
   };
   const appendToResult = (index: number, id: string, text: string): void => {
+    chars += PIECE_SEPARATOR.length + text.length;
     const message = out[index]!;
     out[index] = {
       ...message,
@@ -222,7 +235,8 @@ export function foldHiddenContent<M extends Message>(
   let folded = 0;
   let lost = 0;
   let lastResult: { index: number; id: string } | undefined;
-  for (const { anchor, text } of hidden) {
+  for (const { anchor, text: whole } of hidden) {
+    const text = pieceOf(anchor, whole);
     if ('toolUseId' in anchor && where.has(anchor.toolUseId)) {
       lastResult = { index: where.get(anchor.toolUseId)!, id: anchor.toolUseId };
       appendToResult(lastResult.index, lastResult.id, text);
@@ -233,6 +247,7 @@ export function foldHiddenContent<M extends Message>(
       const index = findRow(anchor.row);
       if (index >= 0) {
         usedRows.add(index);
+        chars += PIECE_SEPARATOR.length + text.length;
         out[index] = { ...out[index]!, text: `${out[index]!.text}${PIECE_SEPARATOR}${text}` };
         folded += 1;
         continue;
@@ -243,5 +258,5 @@ export function foldHiddenContent<M extends Message>(
       folded += 1;
     } else lost += 1;
   }
-  return { messages: out, folded, lost };
+  return { messages: out, folded, lost, chars };
 }
