@@ -2,8 +2,12 @@
 
 Claude Code plugin that replaces the compaction summary with Jev decisions.
 The newest turns stay verbatim, every older tool call and result is scored by
-[Jev](https://typesafe.ai) in one fast request and kept or cut accordingly,
-host notices are trimmed, and old prose can be condensed into a digest.
+[Jev](https://typesafe.ai) (or, opt-in, OpenAI's Decisions API) and kept or
+cut accordingly, host notices are trimmed, and old prose can be condensed into
+a digest.
+
+This is the CrazyCoder fork. It combines the most useful work from the
+upstream project's many forks; see [Features and credits](#features-and-credits).
 
 On a replay of real sessions, `oldProse: digest` with `recentTurns: 8` versus
 the default `keep` took the post-compaction floor from about 155k to about 39k
@@ -70,6 +74,14 @@ people touch:
 | `preserveRecentMessages` | `6` | Newest messages never touched |
 | `provider` | `jev` | Who scores the calls: `jev` (TypeSafe Jev) or `openai` ([OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions), `gpt-6-luna`, key from `OPENAI_API_KEY`). Luna's probabilities are on a different scale from Jev's, so `keepThreshold` and the rank budgets may need retuning |
 
+To score with OpenAI's Decisions API instead of Jev, set `provider` and give
+the key through `OPENAI_API_KEY` in the environment, in the settings' `env`
+block, or in a dotenv file:
+
+```json
+{ "options": { "provider": "openai", "envFile": "C:/path/to/.env" } }
+```
+
 Every option, with its default, is listed in [hooks/README.md](hooks/README.md#configuration).
 
 ## How it works
@@ -94,39 +106,35 @@ whole conversation with tool outputs replaced by a one-line note, fitted into
 `oldProse`; only tool calls, tool results and host-generated notices are cut.
 The full algorithm is in [docs/library.md](docs/library.md#algorithm-in-detail).
 
-## Why this fork
+## Features and credits
 
 Lineage: [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
-(upstream, frozen since 2026-09-17 with about 60 unmerged PRs) →
+(upstream, no push since 2026-09-18, about 60 unmerged PRs) →
 [ferrisworks/fast-jev-compaction](https://github.com/ferrisworks/fast-jev-compaction)
 (integration fork that merged about 13 of them) →
 [QuanticPotatoes/fast-jev-compaction](https://github.com/QuanticPotatoes/fast-jev-compaction)
-→ this fork. Thanks to all three.
+→ this fork, which also takes ideas and code from
+[k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction)
+and [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction).
+Thanks to all of them, and to the authors of the upstream PRs linked below.
 
-This fork adds, on top of QuanticPotatoes 0.8.0:
+### Added in this fork
 
-- **Nothing in the transcript.** Diagnostics, including the per-call
-  decisions, go to the debug log only; the user sees one short toast. Each
-  outcome is also a line in `~/.claude/fast-jev-compaction/compactions.log`,
-  since the desktop app has no `--debug` (approach from
-  [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction)).
-- **Hidden content folded back.** Rows go back without their handles (so
-  `--resume` works, #89), which drops what Claude Code keeps beside them:
-  skill bodies, prompts typed while a tool ran, attachments. The hook reads
-  them from the API form and folds them back as text.
-- **Request policy.** At most `maxConcurrentRequests` (4) Jev requests at once,
-  one retry on 429/5xx, no further requests after 401/403 or no answer, and a
-  failed request's calls are kept instead of the whole compaction failing
-  (from k-metehan).
-- **`/compact` instructions** reach Jev's goal (from k-metehan).
-- **OpenAI Decisions API** as an opt-in `provider` (Jev stays the default;
-  adapted from
-  [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction)).
-- Claude Code 2.1.292 types: `$.model.complete` now returns an object, which
-  had silently broken `oldProse: summarize`.
+| Feature | What it does | Origin |
+| --- | --- | --- |
+| Quiet output | Diagnostics, including the per-call decisions, go to the debug log only; you see one short toast instead of a wall of text in the transcript | k-metehan (6bb138d) |
+| Compaction log file | Each outcome, and each `/compact` queued in a headless session, is one line in `~/.claude/fast-jev-compaction/compactions.log` (newest 200), since the desktop app has no `--debug` | k-metehan (aa912a9) |
+| Hidden content folded back | Kept messages go back without their engine handles so `--resume` starts at the compaction ([#89](https://github.com/tamaratran/fast-jev-compaction/issues/89)). That drops what Claude Code keeps beside each message: skill bodies, prompts typed while a tool ran, attachments, images, ToolSearch-loaded tools. The hook reads them from the conversation's API form and folds them back as text (placeholders for images and deferred tools), counted in the size guards | This fork. k-metehan identified the loss and keeps handles instead, which brings #89 back |
+| Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
+| `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
+| OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | deadczarvc-labs/jev-factkeep-compaction (235a6c6) |
+| Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
 
-QuanticPotatoes added, compared with upstream and ferrisworks:
+### Inherited from QuanticPotatoes and ferrisworks
 
+- **Auto-compaction in the desktop app and `claude -p`.** Those sessions refuse
+  `$.session.compact`, so the `compactAtPercent` trigger queues `/compact`
+  instead (upstream PR [#111](https://github.com/tamaratran/fast-jev-compaction/pull/111)).
 - **Rank-based keeping.** Measured on 4,603 decisions over 60 sessions,
   `keepCall` was about 0.1–0.3 (max 0.58), so the absolute 0.5 threshold kept 0
   calls (upstream issues [#56](https://github.com/tamaratran/fast-jev-compaction/issues/56),
@@ -140,9 +148,14 @@ QuanticPotatoes added, compared with upstream and ferrisworks:
   retained "user" text per issue #70 (idea from upstream PR
   [#78](https://github.com/tamaratran/fast-jev-compaction/pull/78)).
 - **Prose digest and summary** (`oldProse`).
+- **Stubbed instead of deleted calls** (`dropCalls: false`): a silent drop led
+  the model to report work it never did
+  ([#65](https://github.com/tamaratran/fast-jev-compaction/issues/65),
+  PR [#83](https://github.com/tamaratran/fast-jev-compaction/pull/83)).
 - **Robustness from ferrisworks:** secret redaction
-  ([#98](https://github.com/tamaratran/fast-jev-compaction/pull/98)), subagent and
-  speculative compactions skipped
+  ([#98](https://github.com/tamaratran/fast-jev-compaction/pull/98)), handles
+  stripped so `--resume` works ([#89](https://github.com/tamaratran/fast-jev-compaction/issues/89)),
+  subagent and speculative compactions skipped
   ([#112](https://github.com/tamaratran/fast-jev-compaction/pull/112)),
   code-point-safe truncation
   ([#110](https://github.com/tamaratran/fast-jev-compaction/pull/110)), Jev wait
@@ -154,11 +167,13 @@ QuanticPotatoes added, compared with upstream and ferrisworks:
   [#132](https://github.com/tamaratran/fast-jev-compaction/pull/132)).
 - **CI and versioned releases**; see [CHANGELOG.md](CHANGELOG.md).
 
+### Compared
+
 | | upstream 0.3.0 | ferrisworks 0.5.4 | QuanticPotatoes 0.8.0 | this fork |
 | --- | --- | --- | --- | --- |
 | Tool calls kept | Absolute 0.5 threshold | Same | Rank within token budgets | Same |
 | Dropped calls | Deleted | Stub note | Stub note | Stub note |
-| Size guard | Min 25% reduction | Same | Same + `targetPercent` | Same |
+| Size guard | Min 25% reduction | Same | Same + `targetPercent` | Same, hidden content counted |
 | Built-in fallback | Always | Automatic compactions only | Same | Same |
 | Secret redaction | No | Yes | Yes | Yes |
 | Host notices / old prose | Kept | Kept | Trimmed / optional digest | Same |
@@ -168,7 +183,11 @@ QuanticPotatoes added, compared with upstream and ferrisworks:
 | Decision provider | Jev | Jev (any System One endpoint) | Same | Same + OpenAI Decisions |
 | CI and releases | No | No | Yes | Yes |
 
-Roadmap: fact salvage on dropped calls (upstream issues
+Roadmap: a `session_recall` tool that searches the current transcript (which
+compaction never deletes) so the model can fetch a dropped tool result back,
+adapted from [pi-vcc](https://github.com/sting8k/pi-vcc) and
+[pi-blackhole](https://github.com/k0valik/pi-blackhole); fact salvage on
+dropped calls (upstream issues
 [#118](https://github.com/tamaratran/fast-jev-compaction/issues/118),
 [#105](https://github.com/tamaratran/fast-jev-compaction/issues/105)).
 
