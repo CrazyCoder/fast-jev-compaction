@@ -167,10 +167,15 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     proseModel: optionString(options, 'proseModel') ?? HOOK_DEFAULTS.proseModel,
   };
   if (config.compactionTimeoutMs <= 0) config.compactionTimeoutMs = HOOK_DEFAULTS.compactionTimeoutMs;
-  const apiKey = optionString(options, 'apiKey');
-  if (apiKey) config.apiKey = apiKey;
-  const baseUrl = optionString(options, 'baseUrl');
-  if (baseUrl) config.baseUrl = baseUrl;
+  // `apiKey` and `baseUrl` belong to Jev: with openai they are ignored, so a
+  // TypeSafe key or a Jev gateway never receives an OpenAI request, and the
+  // OpenAI key comes from OPENAI_API_KEY alone.
+  if (provider === 'jev') {
+    const apiKey = optionString(options, 'apiKey');
+    if (apiKey) config.apiKey = apiKey;
+    const baseUrl = optionString(options, 'baseUrl');
+    if (baseUrl) config.baseUrl = baseUrl;
+  }
   const envFile = optionString(options, 'envFile');
   if (envFile) config.envFile = envFile;
   const goal = optionString(options, 'goal');
@@ -427,7 +432,6 @@ export function decisionLogLines(
   );
 }
 
-/** The names a key may be stored under, in the order they are tried. */
 /** The variables a provider's key is read from, in order. */
 const KEY_NAMES: Record<JevProvider, readonly string[]> = {
   jev: ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY'],

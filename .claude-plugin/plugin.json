@@ -12,14 +12,14 @@
     },
     "apiKey": {
       "type": "string",
-      "title": "API key",
-      "description": "Key for the provider. Leave unset to use TYPESAFE_API_KEY or OPENROUTER_API_KEY (jev), OPENAI_API_KEY (openai), or envFile.",
+      "title": "Jev API key",
+      "description": "TypeSafe (or OpenRouter) key for provider jev. Leave unset to use TYPESAFE_API_KEY, OPENROUTER_API_KEY or envFile. Ignored with provider openai, which reads OPENAI_API_KEY.",
       "sensitive": true
     },
     "baseUrl": {
       "type": "string",
       "title": "Jev endpoint",
-      "description": "Endpoint the Jev call goes to. Leave unset for the TypeSafe one; set it to https://openrouter.ai/api/alpha/decisions to reach the same model through OpenRouter.",
+      "description": "Endpoint the Jev call goes to. Leave unset for the TypeSafe one; set it to https://openrouter.ai/api/alpha/decisions to reach the same model through OpenRouter. Ignored with provider openai.",
       "default": ""
     },
     "envFile": {

@@ -105,6 +105,19 @@ describe('provider option in the hook', () => {
     expect(await getApiKey($, resolveHookConfig({ provider: 'openai' }))).toBeUndefined();
   });
 
+  it('never hands the Jev key or the Jev endpoint to the openai provider', async () => {
+    const config = resolveHookConfig({ provider: 'openai', apiKey: 'ts-key', baseUrl: 'https://openrouter.ai/api/alpha/decisions' });
+    expect(config).not.toHaveProperty('apiKey');
+    expect(config).not.toHaveProperty('baseUrl');
+    const $ = {
+      env: { get: async (name: string) => (name === 'OPENAI_API_KEY' ? 'sk-key' : undefined) },
+      settings: { read: async () => ({}) },
+      fs: { read: async () => '' },
+    };
+    expect(await getApiKey($, config)).toBe('sk-key');
+    expect(resolveHookConfig({ apiKey: 'ts-key', baseUrl: 'https://gw' })).toMatchObject({ apiKey: 'ts-key', baseUrl: 'https://gw' });
+  });
+
   it('asks the Decisions endpoint when the provider is openai', async () => {
     const urls: string[] = [];
     const asker = jevAsker(

@@ -88,6 +88,8 @@ should not sit in a settings file.
 (`https://api.openai.com/v1/decisions`, `gpt-6-luna`) instead of Jev: the
 state goes as the text `input`, each question as a named `predicate`, and the
 key comes from `OPENAI_API_KEY` (environment, settings `env`, or `envFile`).
+The `apiKey` and `baseUrl` options belong to Jev and are ignored with
+`openai`, so a TypeSafe key or a Jev gateway never receives an OpenAI request.
 A refusal keeps the call. Luna's probabilities are on a different scale from
 Jev's, so `keepThreshold` and the rank budgets may need retuning.
 
