@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,15 +59,26 @@ describe('recall in Node', () => {
     );
   });
 
-  it('runs as a script: request on stdin, answer on stdout', () => {
+  /** Runs `script` with this Node, a request on stdin, and checks the answer on stdout. */
+  function expectScriptAnswers(script: string): void {
     const { dir } = configDir();
-    const run = spawnSync(process.execPath, [CLI], {
+    const run = spawnSync(process.execPath, [script], {
       input: JSON.stringify({ configDir: dir, sessionId: SESSION, request: { expand: ['t1'] } }),
       encoding: 'utf8',
     });
     expect(run.stderr).toBe('');
     expect(run.status).toBe(0);
     expect(run.stdout).toContain('FULL SAVED OUTPUT');
+  }
+
+  it('runs as a script: request on stdin, answer on stdout', () => {
+    expectScriptAnswers(CLI);
+  });
+
+  it('runs as a script reached through a symlink or junction', () => {
+    const link = join(mkdtempSync(join(tmpdir(), 'recall-link-')), 'src');
+    symlinkSync(join(CLI, '..', '..'), link, 'junction');
+    expectScriptAnswers(join(link, 'recall', 'cli.ts'));
   });
 });
 
@@ -111,6 +122,15 @@ describe('recall in subagent transcripts', () => {
     expect(await ask(dir, { query: 'x', agent: 'nope' })).toBe('No subagent matches "nope". agent: "list" shows them.');
   });
 
+  it('numbers subagent entries after the session\'s, the same whichever agent is asked for', async () => {
+    const dir = withAgent();
+    const one = await ask(dir, { query: 'cache.yml', agent: 'cache config' });
+    const n = /^#(\d+) \[Explore: Find the cache config\] call Grep \(s1\)/m.exec(one)?.[1];
+    expect(n).toBe('6');
+    expect(await ask(dir, { expand: [`#${n}`] })).toContain('config/cache.yml:3: timeout: 5');
+    expect(await ask(dir, { range: [5, 7], agent: 'all' })).toContain('#6 [Explore: Find the cache config] call Grep (s1)');
+  });
+
   it('expands a subagent call by its id from the session view, and shows which agent an Agent call started', async () => {
     const dir = withAgent();
     expect(await ask(dir, { expand: ['s1'] })).toContain('config/cache.yml:3: timeout: 5');
@@ -126,9 +146,10 @@ describe('recallCommand', () => {
   });
 
   it('runs .\\node.cmd through cmd.exe from the tools folder on Windows, a space in the path or not', () => {
-    expect(recallCommand('C:\\Users\\Jo Ann\\.claude\\plugins\\fjc')).toEqual({
-      argv: ['cmd.exe', '/d', '/s', '/c', '.\\node.cmd', 'C:\\Users\\Jo Ann\\.claude\\plugins\\fjc\\src\\recall\\cli.ts'],
-      cwd: 'C:\\Users\\Jo Ann\\.claude\\plugins\\fjc\\tools',
+    // The script path is relative, so cmd.exe never parses the plugin folder (`&`, `%`).
+    expect(recallCommand('C:\\Users\\Jo Ann\\.claude\\plugins\\R&D fjc')).toEqual({
+      argv: ['cmd.exe', '/d', '/s', '/c', '.\\node.cmd', '..\\src\\recall\\cli.ts'],
+      cwd: 'C:\\Users\\Jo Ann\\.claude\\plugins\\R&D fjc\\tools',
     });
   });
 });

@@ -95,15 +95,15 @@ export function isSavedOutput(path: string, configDir: string): boolean {
 
 /**
  * How to run src/recall/cli.ts under tools/node.cmd from the plugin folder
- * `root`: through bash on Linux and macOS; on Windows through cmd.exe with
- * the tools folder as the working directory, since cmd.exe /s cannot take a
- * quoted command path and `root` can hold a space. The request goes on stdin.
+ * `root`: through bash on Linux and macOS; on Windows through cmd.exe from
+ * the tools folder with paths relative to it, so cmd.exe never parses `root`
+ * (it can hold a space, `&` or `%`). The request goes on stdin.
  */
 export function recallCommand(root: string): { argv: string[]; cwd?: string } {
   if (/^[A-Za-z]:[\\/]/.test(root) || root.startsWith('\\\\')) {
     const base = root.replace(/[\\/]+$/, '');
     return {
-      argv: ['cmd.exe', '/d', '/s', '/c', '.\\node.cmd', `${base}\\src\\recall\\cli.ts`],
+      argv: ['cmd.exe', '/d', '/s', '/c', '.\\node.cmd', '..\\src\\recall\\cli.ts'],
       cwd: `${base}\\tools`,
     };
   }

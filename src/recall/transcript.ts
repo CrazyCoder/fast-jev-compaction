@@ -5,11 +5,12 @@
  *
  * A compaction keeps the transcript and appends a `compact_boundary` row, then
  * writes the messages it kept again, so the history after a boundary starts
- * with copies. A tool call keeps the first result read for its id (the uncut
- * one). A prompt or reply counts once per position: it is the same entry when
- * the same text follows the same entry within a stretch between boundaries, so
- * a kept copy is skipped while the same words said again after other work are
- * not.
+ * with copies. The copies carry the compaction's time, no later than the
+ * boundary's; their prompts and replies are skipped, and a tool call keeps the
+ * first result read for its id (the uncut one). A transcript without
+ * timestamps falls back on position: the same text after the same entry within
+ * a stretch between boundaries is the same entry. Claude Code can also append
+ * rows again under their own uuid; a uuid is read once.
  */
 
 export type Entry =
@@ -36,6 +37,8 @@ type Block = { type?: string; [field: string]: unknown };
 type Row = {
   type?: string;
   subtype?: string;
+  uuid?: string;
+  timestamp?: string;
   isMeta?: boolean;
   isSidechain?: boolean;
   isCompactSummary?: boolean;
@@ -76,10 +79,19 @@ export function transcriptReader({ sidechain = false, orphanResults = false } = 
   /** Each prompt or reply seen, keyed by its text and the entry before it, to an id. */
   const texts = new Map<string, string>();
   let previous = '';
+  /** The last boundary's time: rows stamped no later are its copies. */
+  let boundaryAt = Number.NEGATIVE_INFINITY;
+  let copy = false;
+  let timed = false;
+  const uuids = new Set<string>();
 
   const text = (kind: 'prompt' | 'reply', raw: string): void => {
     const body = withoutReminders(raw).trim();
-    if (!body) return;
+    if (!body || copy) return;
+    if (timed) {
+      entries.push({ n: entries.length + 1, kind, text: body });
+      return;
+    }
     const key = `${kind}\u0000${body}\u0000${previous}`;
     const seen = texts.get(key);
     if (seen !== undefined) {
@@ -116,12 +128,20 @@ export function transcriptReader({ sidechain = false, orphanResults = false } = 
     } catch {
       return;
     }
+    if (row.uuid) {
+      if (uuids.has(row.uuid)) return;
+      uuids.add(row.uuid);
+    }
+    const at = row.timestamp ? Date.parse(row.timestamp) : Number.NaN;
     if (row.type === 'system' && row.subtype === 'compact_boundary') {
       previous = '';
+      if (!Number.isNaN(at)) boundaryAt = at;
       return;
     }
     if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isCompactSummary) return;
     if (row.isSidechain && !sidechain) return;
+    timed = !Number.isNaN(at);
+    copy = at <= boundaryAt;
     const content = row.message?.content;
     const blocks: Block[] = Array.isArray(content) ? (content as Block[]) : [];
     if (row.type === 'user') {

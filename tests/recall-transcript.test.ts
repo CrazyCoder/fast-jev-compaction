@@ -54,6 +54,41 @@ describe('readTranscript', () => {
     expect(entries[1]).toMatchObject({ result: FULL });
   });
 
+  it('skips copies that keep only some messages, by their compaction-time timestamp', () => {
+    const at = (time: string) => ({ timestamp: `2026-10-10T${time}Z` });
+    const entries = readTranscript(
+      [
+        row('user', 'Fix the bug.', at('10:00:00')),
+        row('assistant', [{ type: 'text', text: 'Looking.' }], at('10:00:01')),
+        row('assistant', [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }], at('10:00:02')),
+        row('user', [{ type: 'tool_result', tool_use_id: 't1', content: FULL }], at('10:00:03')),
+        row('assistant', [{ type: 'text', text: 'Fixed it.' }], at('10:00:04')),
+        JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: '2026-10-10T11:00:00.500Z' }),
+        // The kept copies, stamped just before the boundary: the call was dropped.
+        row('user', 'Fix the bug.', at('11:00:00.400')),
+        row('assistant', [{ type: 'text', text: 'Fixed it.' }], at('11:00:00.400')),
+        // Said again after the compaction: a new entry.
+        row('user', 'Fix the bug.', at('11:05:00')),
+      ].join('\n'),
+    );
+    expect(entries.map((e) => (e.kind === 'call' ? e.id : e.text))).toEqual([
+      'Fix the bug.',
+      'Looking.',
+      't1',
+      'Fixed it.',
+      'Fix the bug.',
+    ]);
+  });
+
+  it('reads a row once when the transcript holds it again under the same uuid', () => {
+    const rows = [
+      row('user', 'Fix the bug.', { uuid: 'u1', timestamp: '2026-10-10T10:00:00Z' }),
+      row('assistant', [{ type: 'text', text: 'Fixed it.' }], { uuid: 'u2', timestamp: '2026-10-10T10:00:01Z' }),
+    ];
+    const entries = readTranscript([...rows, ...rows, row('user', 'Thanks.', { uuid: 'u3' })].join('\n'));
+    expect(entries.map((e) => (e.kind === 'call' ? e.id : e.text))).toEqual(['Fix the bug.', 'Fixed it.', 'Thanks.']);
+  });
+
   it('reads sidechain rows when asked, as a subagent transcript holds only those', () => {
     const lines = [row('user', 'Research it.', { isSidechain: true }), row('assistant', [{ type: 'text', text: 'Found it.' }], { isSidechain: true })];
     expect(readTranscript(lines.join('\n'))).toEqual([]);

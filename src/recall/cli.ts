@@ -6,7 +6,6 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readEntries } from './files.ts';
 import { resolveRefs, runRecall, type RecallDeps, type RecallRequest } from './recall.ts';
 import { buildIndex, qmdCommand, qmdIndex } from './qmd.ts';
@@ -17,7 +16,7 @@ import type { Entry } from './transcript.ts';
 /**
  * The request on stdin. `sessionIndex: "off"` keeps the cross-session search
  * on the transcript scan even with qmd installed; `rg` names the ripgrep
- * binary (tests point it at a missing one).
+ * binary and `scanBudgetMs` caps the scan (tests set both).
  */
 export type CliInput = {
   configDir: string;
@@ -25,17 +24,18 @@ export type CliInput = {
   request: RecallRequest;
   sessionIndex?: 'auto' | 'off';
   rg?: string;
+  scanBudgetMs?: number;
 };
 
 /** A subagent of the session: `<session>/subagents/agent-<id>.jsonl` and its `.meta.json`. */
 type Agent = { id: string; name: string; startedBy?: string; file: string };
 
-/** The session's subagents, from their meta files. */
+/** The session's subagents, from their meta files, in file name order. */
 function sessionAgents(sessionDir: string): Agent[] {
   const dir = join(sessionDir, 'subagents');
   if (!existsSync(dir)) return [];
   const agents: Agent[] = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync(dir).sort()) {
     const id = /^agent-([\w-]+)\.jsonl$/.exec(name)?.[1];
     if (!id) continue;
     let meta: { agentType?: unknown; description?: unknown; toolUseId?: unknown } = {};
@@ -56,11 +56,17 @@ function sessionAgents(sessionDir: string): Agent[] {
   return agents;
 }
 
-/** Each agent's entries, labelled with its name and numbered on from `after`. */
-async function agentEntries(agents: readonly Agent[], after: number): Promise<Entry[]> {
-  const out: Entry[] = [];
+/**
+ * Every agent's entries, labelled with its name and numbered on from `after`,
+ * the session's own count: an entry keeps its number whichever agents a
+ * request picks.
+ */
+async function agentEntries(agents: readonly Agent[], after: number): Promise<{ agent: Agent; entry: Entry }[]> {
+  const out: { agent: Agent; entry: Entry }[] = [];
   for (const agent of agents) {
-    for (const entry of await readEntries(agent.file, true)) out.push({ ...entry, n: after + out.length + 1, where: agent.name });
+    for (const entry of await readEntries(agent.file, true)) {
+      out.push({ agent, entry: { ...entry, n: after + out.length + 1, where: agent.name } });
+    }
   }
   return out;
 }
@@ -91,7 +97,7 @@ export function findTranscript(configDir: string, sessionId: string): string | u
   return undefined;
 }
 
-export async function answer({ configDir, sessionId, request, sessionIndex = 'auto', rg }: CliInput): Promise<string> {
+export async function answer({ configDir, sessionId, request, sessionIndex = 'auto', rg, scanBudgetMs }: CliInput): Promise<string> {
   const file = /^[\w-]+$/.test(sessionId) ? findTranscript(configDir, sessionId) : undefined;
   if (!file) return 'Recall: no transcript found for this session.';
   const { sessions, project, session, ...rest } = request;
@@ -99,6 +105,7 @@ export async function answer({ configDir, sessionId, request, sessionIndex = 'au
     const qmd = sessionIndex === 'auto' ? qmdCommand() : undefined;
     return searchSessions(configDir, file, sessions.trim(), project, rest.page ?? 1, {
       ...(rg && { rg }),
+      ...(scanBudgetMs !== undefined && { budgetMs: scanBudgetMs }),
       ...(qmd && { index: qmdIndex(configDir, { command: qmd }) }),
     });
   }
@@ -134,12 +141,12 @@ async function answerFile(configDir: string, file: string, request: RecallReques
     const part = wanted.toLowerCase();
     const picked = wanted === 'all' ? agents : agents.filter((a) => `${a.id} ${a.name}`.toLowerCase().includes(part));
     if (picked.length === 0) return `No subagent matches "${wanted.slice(0, 100)}". agent: "list" shows them.`;
-    const own = wanted === 'all' ? main : [];
-    return runRecall([...own, ...(await agentEntries(picked, own.length))], rest, deps);
+    const theirs = (await agentEntries(agents, main.length)).filter(({ agent: a }) => picked.includes(a)).map(({ entry }) => entry);
+    return runRecall([...(wanted === 'all' ? main : []), ...theirs], rest, deps);
   }
-  // A tool_use_id the session's transcript does not hold may be a subagent's.
+  // An entry the session's transcript does not hold may be a subagent's.
   if (rest.expand?.length && resolveRefs(main, rest.expand).missing.length > 0 && agents.length > 0) {
-    return runRecall([...main, ...(await agentEntries(agents, main.length))], rest, deps);
+    return runRecall([...main, ...(await agentEntries(agents, main.length)).map(({ entry }) => entry)], rest, deps);
   }
   return runRecall(main, rest, deps);
 }
@@ -163,4 +170,4 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) void main();
+if (import.meta.main) void main();

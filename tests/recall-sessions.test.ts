@@ -80,7 +80,9 @@ describe('recall across sessions', () => {
     const dir = config();
     const jet = await ask(dir, { sessions: 'jscpd baseline', project: 'billing-api' });
     expect(jet).toMatch(/in 1 session\(s\) of projects matching "billing-api"/);
-    expect(jet).toMatch(new RegExp(`^#\\d+ \\[billing-api · 2026-10-08 · "Add duplicate code gate" · ${OTHER_PROJECT}\\] call Bash \\(toolu_j\\)`, 'm'));
+    // Ranked, not #N: a hit's number in its own session is unknown to the scan.
+    expect(jet).toMatch(new RegExp(`^1\\. \\[billing-api · 2026-10-08 · "Add duplicate code gate" · ${OTHER_PROJECT}\\] call Bash \\(toolu_j\\)`, 'm'));
+    expect(jet).not.toMatch(/^#\d/m);
     const all = await ask(dir, { sessions: 'jscpd', project: 'all' });
     expect(all).toMatch(/in 2 session\(s\) of all projects/);
     expect(await ask(dir, { sessions: 'jscpd', project: 'nope' })).toBe('No project matches "nope".');
@@ -94,6 +96,25 @@ describe('recall across sessions', () => {
     expect(both).not.toContain(SAME_PROJECT);
     const either = await ask(dir, { sessions: 'clones duplicate', project: 'all' });
     expect(either).toMatch(/in 2 session\(s\) of all projects/);
+  });
+
+  it('asks for real keywords instead of scanning every line for "the" or "a"', async () => {
+    const dir = config();
+    for (const sessions of ['the', 'a', 'of the']) {
+      expect(await ask(dir, { sessions, project: 'all' })).toMatch(/^Too broad: give a word that says what to find/);
+    }
+  });
+
+  it('answers with what it read when the scan runs out of time', async () => {
+    const dir = config();
+    const out = await answer({ configDir: dir, sessionId: CURRENT, request: { sessions: 'jscpd', project: 'all' }, sessionIndex: 'off', scanBudgetMs: 0 });
+    expect(out).toMatch(/Read 1 of 2 matching sessions before the time ran out/);
+  });
+
+  it('labels a hit with its own project when one project folder name starts another', async () => {
+    const dir = config();
+    write(dir, 'C--work-app-admin', '44444444-4444-4444-8444-444444444444', [prompt('Add jscpd to admin.', 'C:\\work\\app-admin')], '2026-10-09');
+    expect(await ask(dir, { sessions: 'admin', project: 'all' })).toContain('[app-admin · 2026-10-09');
   });
 
   it('runs any request on another session by its id or the first 8 characters of it', async () => {

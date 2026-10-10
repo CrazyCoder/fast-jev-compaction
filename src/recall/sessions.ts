@@ -10,8 +10,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { keywords, runQuery } from './recall.ts';
+import { basename, join, sep } from 'node:path';
+import { keywords, runQuery, tooBroad } from './recall.ts';
 import {
   lines,
   noteMeta,
@@ -114,12 +114,16 @@ function indexedAnswer(hits: readonly IndexedHit[], query: string, page: number,
   const next = current < pages ? ` Next: page: ${current + 1}.` : '';
   return [
     `${hits.length} match(es) in ${sessions} session(s) ${scope} for "${echo}" (session index), page ${current}/${pages}:`,
-    ...shown.map((h, i) => `#${(current - 1) * PAGE + i + 1} [${h.where}] ${h.heading}\n${h.snippet}`),
+    ...shown.map((h, i) => `${(current - 1) * PAGE + i + 1}. [${h.where}] ${h.heading}\n${h.snippet}`),
     `${FOOTER}${next}`,
   ].join('\n\n');
 }
 
-export type SearchOptions = { rg?: string; index?: SessionIndex };
+/** How long a scan may read transcripts before it answers with what it has. */
+const SCAN_BUDGET_MS = 30_000;
+const TOO_BROAD = 'Too broad: give a word that says what to find, such as a file, tool, error or name.';
+
+export type SearchOptions = { rg?: string; index?: SessionIndex; budgetMs?: number };
 
 /**
  * Ranked hits for `query` in other sessions: of the project holding
@@ -132,8 +136,9 @@ export async function searchSessions(
   query: string,
   project: string | undefined,
   page: number,
-  { rg = 'rg', index }: SearchOptions = {},
+  { rg = 'rg', index, budgetMs = SCAN_BUDGET_MS }: SearchOptions = {},
 ): Promise<string> {
+  if (tooBroad(query)) return TOO_BROAD;
   const all = projects(configDir);
   const part = project?.trim().toLowerCase();
   let picked: Project[];
@@ -169,15 +174,21 @@ export async function searchSessions(
     rg,
   ).filter((f) => basename(f, '.jsonl') !== exclude);
   const scanned: { file: string; hits: SessionHits }[] = [];
+  const stopAt = Date.now() + budgetMs;
+  let read = 0;
   for (const file of files) {
+    if (read > 0 && Date.now() >= stopAt) break;
     const hits = await scan(file, terms);
+    read += 1;
     if (hits.entries.length > 0) scanned.push({ file, hits });
   }
+  const partial =
+    read < files.length ? ` Read ${read} of ${files.length} matching sessions before the time ran out: narrow with project or more keywords.` : '';
   // The sessions that hold every keyword, or those holding any when none does.
   const complete = scanned.filter((s) => s.hits.seen.size === terms.length);
   const entries: Entry[] = [];
   for (const { file, hits } of complete.length > 0 ? complete : scanned) {
-    const owner = picked.find((p) => file.startsWith(p.dir));
+    const owner = picked.find((p) => file.startsWith(p.dir + sep));
     const where = sessionLabel(
       owner ? projectName(owner) : '?',
       dateOf(statSync(file).mtimeMs),
@@ -189,8 +200,9 @@ export async function searchSessions(
   const sessionsIn = (hits: readonly Entry[]) => new Set(hits.map((h) => h.where)).size;
   return runQuery(entries, query, page, {
     scope: (hits) => `in ${sessionsIn(hits)} session(s) ${scope}`,
-    footer: FOOTER,
-    none: (echo) => `No match for "${echo}" in the other sessions ${scope}.`,
+    footer: `${FOOTER}${partial}`,
+    none: (echo) => `No match for "${echo}" in the other sessions ${scope}.${partial}`,
+    ranked: true,
   });
 }
 

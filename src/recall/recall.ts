@@ -137,8 +137,17 @@ const BM25_B = 0.75;
 /** The words a query ranks by: regex characters dropped, and stopwords unless nothing else is left. */
 export function keywords(query: string): string[] {
   const words = query.replace(/[|*+?{}()[\]\\^$]/g, ' ').split(/\s+/).filter(Boolean);
-  const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()) && w.length > 1);
+  const meaningful = meaningfulWords(words);
   return meaningful.length > 0 ? meaningful : words;
+}
+
+function meaningfulWords(words: readonly string[]): string[] {
+  return words.filter((w) => !STOPWORDS.has(w.toLowerCase()) && w.length > 1);
+}
+
+/** Whether `query` has no word but stopwords and single characters. */
+export function tooBroad(query: string): boolean {
+  return meaningfulWords(query.replace(/[|*+?{}()[\]\\^$]/g, ' ').split(/\s+/)).length === 0;
 }
 
 /** The searchable text of an entry. */
@@ -198,11 +207,13 @@ function search(entries: readonly Entry[], query: string): { hits: Entry[]; mark
 const clip = (text: string, chars: number): string => (text.length <= chars ? text : `${text.slice(0, chars)}…`);
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
-function heading(entry: Entry): string {
+/** An entry's heading, labelled `#N` or, for hits whose number is unknown, by `rank`. */
+function heading(entry: Entry, rank?: number): string {
+  const label = rank === undefined ? `#${entry.n}` : `${rank}.`;
   const where = entry.where ? ` [${entry.where}]` : '';
-  if (entry.kind !== 'call') return `#${entry.n}${where} ${entry.kind}`;
+  if (entry.kind !== 'call') return `${label}${where} ${entry.kind}`;
   const started = entry.agentId ? ` [started agent ${entry.agentId}]` : '';
-  return `#${entry.n}${where} call ${entry.tool} (${entry.id})${started}`;
+  return `${label}${where} call ${entry.tool} (${entry.id})${started}`;
 }
 
 /** The input field that says most about a call, for one-line listings. */
@@ -243,6 +254,8 @@ export type QueryText = {
   scope?: (hits: readonly Entry[]) => string;
   footer?: string;
   none?: (echo: string) => string;
+  /** Label hits by rank: their `#N` is not one `expand` would find. */
+  ranked?: boolean;
 };
 
 /** Ranked hits for `query`, a page at a time. */
@@ -253,7 +266,7 @@ export function runQuery(entries: readonly Entry[], query: string, page: number,
   const p = pager(hits.length, QUERY_PAGE, page);
   const blocks = hits
     .slice(p.from, p.from + QUERY_PAGE)
-    .map((entry) => `${heading(entry)}\n${snippet(docOf(entry), marker)}`);
+    .map((entry, i) => `${heading(entry, text.ranked ? p.from + i + 1 : undefined)}\n${snippet(docOf(entry), marker)}`);
   const next = p.page < p.pages ? ` Next: page: ${p.page + 1}.` : '';
   const scope = text.scope ? ` ${text.scope(hits)}` : '';
   return [

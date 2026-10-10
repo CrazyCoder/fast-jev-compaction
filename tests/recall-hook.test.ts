@@ -35,7 +35,11 @@ const cutAll = async (_url: string, init: { body: string }) => {
 
 /** Runs src/recall/cli.ts with this Node, as tools/node.cmd would with the pinned one. */
 const realCli = async (argv: readonly string[], init?: Run['init']) => {
-  const run = spawnSync(process.execPath, [argv.at(-1)!], { input: init?.stdin ?? '', encoding: 'utf8' });
+  const run = spawnSync(process.execPath, [argv.at(-1)!], {
+    input: init?.stdin ?? '',
+    encoding: 'utf8',
+    ...(init?.cwd && { cwd: init.cwd }),
+  });
   return { exitCode: run.status ?? 1, stdout: run.stdout, stderr: run.stderr };
 };
 
