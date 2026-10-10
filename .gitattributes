@@ -1,0 +1,10 @@
+# Shell scripts: LF everywhere
+*.sh   eol=lf
+
+# Polyglot .cmd files mix line endings on purpose (CRLF header and batch part,
+# LF bash body); -text keeps their bytes under any core.autocrlf. See
+# tools/README.md.
+*.cmd  -text
+
+# The vendored PowerShell engine stays byte-identical to its source.
+*.ps1  -text

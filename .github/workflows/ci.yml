@@ -9,6 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  node-wrapper:
+    # tools/node.cmd must download, verify and run the pinned Node under bash
+    # and under cmd.exe; the recall tool runs on it.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: tools/node.cmd under bash
+        if: runner.os != 'Windows'
+        run: bash tools/node.cmd -e "process.stdout.write(process.version)" | grep -x "v$(sed -n 's/^export TOOL_VERSION=\"\(.*\)\"/\1/p' tools/node.cmd)"
+      - name: tools\node.cmd under cmd.exe
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: tools\node.cmd --version
   test:
     runs-on: ubuntu-latest
     steps:
@@ -21,6 +37,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Line endings of .cmd files (through the pinned Node)
+        run: bash tools/node.cmd scripts/check-polyglot-line-endings.ts
       - name: Duplicate code gate (jscpd)
         run: npx vitest run tests/jscpd.test.ts
       - run: npx vitest run --exclude tests/jscpd.test.ts
