@@ -21,8 +21,8 @@ flag and your key where Claude Code runs, e.g. in `~/.claude/settings.json`:
 ```
 
 ```sh
-claude plugin marketplace add QuanticPotatoes/fast-jev-compaction
-claude plugin install fast-jev-compaction@quanticpotatoes
+claude plugin marketplace add CrazyCoder/fast-jev-compaction
+claude plugin install fast-jev-compaction@crazycoder
 ```
 
 Restart Claude Code or run `/reload-plugins`. `/compact` and auto-compaction
@@ -34,7 +34,7 @@ line in `~/.claude/fast-jev-compaction/compactions.log`.
 
 **Updating.** Claude Code updates a plugin only when its version changes.
 Set `autoUpdate: true` on the marketplace entry, or run
-`claude plugin marketplace update quanticpotatoes`.
+`claude plugin marketplace update crazycoder`.
 
 To try it from a checkout: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir .`
 
@@ -46,7 +46,7 @@ people touch:
 ```json
 {
   "pluginConfigs": {
-    "fast-jev-compaction@quanticpotatoes": {
+    "fast-jev-compaction@crazycoder": {
       "options": {
         "compactAtPercent": 60,
         "oldProse": "digest",
@@ -99,8 +99,33 @@ The full algorithm is in [docs/library.md](docs/library.md#algorithm-in-detail).
 Lineage: [tamaratran/fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction)
 (upstream, frozen since 2026-09-17 with about 60 unmerged PRs) →
 [ferrisworks/fast-jev-compaction](https://github.com/ferrisworks/fast-jev-compaction)
-(integration fork that merged about 13 of them) → this fork. Thanks to both.
-Compared with them, this fork adds:
+(integration fork that merged about 13 of them) →
+[QuanticPotatoes/fast-jev-compaction](https://github.com/QuanticPotatoes/fast-jev-compaction)
+→ this fork. Thanks to all three.
+
+This fork adds, on top of QuanticPotatoes 0.8.0:
+
+- **Nothing in the transcript.** Diagnostics, including the per-call
+  decisions, go to the debug log only; the user sees one short toast. Each
+  outcome is also a line in `~/.claude/fast-jev-compaction/compactions.log`,
+  since the desktop app has no `--debug` (approach from
+  [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction)).
+- **Hidden content folded back.** Rows go back without their handles (so
+  `--resume` works, #89), which drops what Claude Code keeps beside them:
+  skill bodies, prompts typed while a tool ran, attachments. The hook reads
+  them from the API form and folds them back as text.
+- **Request policy.** At most `maxConcurrentRequests` (4) Jev requests at once,
+  one retry on 429/5xx, no further requests after 401/403 or no answer, and a
+  failed request's calls are kept instead of the whole compaction failing
+  (from k-metehan).
+- **`/compact` instructions** reach Jev's goal (from k-metehan).
+- **OpenAI Decisions API** as an opt-in `provider` (Jev stays the default;
+  adapted from
+  [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction)).
+- Claude Code 2.1.292 types: `$.model.complete` now returns an object, which
+  had silently broken `oldProse: summarize`.
+
+QuanticPotatoes added, compared with upstream and ferrisworks:
 
 - **Rank-based keeping.** Measured on 4,603 decisions over 60 sessions,
   `keepCall` was about 0.1–0.3 (max 0.58), so the absolute 0.5 threshold kept 0
@@ -129,15 +154,19 @@ Compared with them, this fork adds:
   [#132](https://github.com/tamaratran/fast-jev-compaction/pull/132)).
 - **CI and versioned releases**; see [CHANGELOG.md](CHANGELOG.md).
 
-| | upstream 0.3.0 | ferrisworks 0.5.4 | this fork |
-| --- | --- | --- | --- |
-| Tool calls kept | Absolute 0.5 threshold | Same | Rank within token budgets |
-| Dropped calls | Deleted | Stub note | Stub note |
-| Size guard | Min 25% reduction | Same | Same + `targetPercent` |
-| Built-in fallback | Always | Automatic compactions only | Same |
-| Secret redaction | No | Yes | Yes |
-| Host notices / old prose | Kept | Kept | Trimmed / optional digest |
-| CI and releases | No | No | Yes |
+| | upstream 0.3.0 | ferrisworks 0.5.4 | QuanticPotatoes 0.8.0 | this fork |
+| --- | --- | --- | --- | --- |
+| Tool calls kept | Absolute 0.5 threshold | Same | Rank within token budgets | Same |
+| Dropped calls | Deleted | Stub note | Stub note | Stub note |
+| Size guard | Min 25% reduction | Same | Same + `targetPercent` | Same |
+| Built-in fallback | Always | Automatic compactions only | Same | Same |
+| Secret redaction | No | Yes | Yes | Yes |
+| Host notices / old prose | Kept | Kept | Trimmed / optional digest | Same |
+| Transcript output | Decision dump | Same | Same | One toast; debug log and log file |
+| Hidden content after compaction | Kept on untouched rows (`--resume` reloads the old history) | Lost (no handles) | Lost | Folded back as text |
+| Failed Jev request | Whole compaction falls back | Same | Same | Its calls kept, rest applied |
+| Decision provider | Jev | Jev (any System One endpoint) | Same | Same + OpenAI Decisions |
+| CI and releases | No | No | Yes | Yes |
 
 Roadmap: fact salvage on dropped calls (upstream issues
 [#118](https://github.com/tamaratran/fast-jev-compaction/issues/118),

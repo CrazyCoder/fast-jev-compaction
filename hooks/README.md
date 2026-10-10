@@ -35,8 +35,8 @@ hooks surface before installing or loading it:
 export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 export TYPESAFE_API_KEY="<your TypeSafe key>"
 
-claude plugin marketplace add QuanticPotatoes/fast-jev-compaction
-claude plugin install fast-jev-compaction@quanticpotatoes
+claude plugin marketplace add CrazyCoder/fast-jev-compaction
+claude plugin install fast-jev-compaction@crazycoder
 ```
 
 For local development:

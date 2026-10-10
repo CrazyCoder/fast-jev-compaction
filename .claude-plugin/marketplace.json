@@ -1,15 +1,15 @@
 {
-  "name": "quanticpotatoes",
+  "name": "crazycoder",
   "owner": {
-    "name": "QuanticPotatoes",
-    "url": "https://github.com/QuanticPotatoes"
+    "name": "CrazyCoder",
+    "url": "https://github.com/CrazyCoder"
   },
   "plugins": [
     {
       "name": "fast-jev-compaction",
       "source": "./",
       "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "license": "MIT"
     }
   ],

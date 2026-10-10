@@ -3,6 +3,40 @@
 All notable changes to this fork are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0]
+
+First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
+
+### Added
+
+- Each compaction outcome, and each `/compact` queued in a headless session,
+  is appended as one line to `<CLAUDE_CONFIG_DIR or ~/.claude>/fast-jev-compaction/compactions.log`
+  (newest 200 lines).
+- Hidden content (skill bodies, prompts typed while a tool ran, attachments,
+  images and ToolSearch-loaded tools) is read from the conversation's API form
+  and folded back as text into the handle-stripped rows; images and deferred
+  tools become placeholders. Token countdowns and the session context the host
+  re-sends are skipped.
+- `maxConcurrentRequests` (default 4); a 429 or 5xx is retried once after 1 s;
+  no further request starts after a 401, 403 or no answer; the calls of a
+  request that still failed are kept and counted in `stats.requestsFailed`.
+- `/compact <instructions>` reach Jev's goal (`instructions` option, capped at
+  2000 characters).
+- `provider: "openai"`: OpenAI's Decisions API (`gpt-6-luna`, key from
+  `OPENAI_API_KEY`) instead of Jev. Jev stays the default.
+
+### Changed
+
+- Diagnostics (outcome line, per-call decisions, redaction count, skipped
+  auto-compacts) go to the debug log only; the user sees one short toast.
+- Type reference from Claude Code 2.1.292.
+- Marketplace renamed to `crazycoder`.
+
+### Fixed
+
+- `oldProse: summarize` always fell back to the digest on Claude Code 2.1.292+,
+  where `$.model.complete` returns a result object instead of a string.
+
 ## [0.8.0]
 
 ### Added
