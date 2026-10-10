@@ -5,12 +5,8 @@ The repository is also an npm package (`src/`). The Claude Code plugin in
 
 ## Install and usage
 
-The package is not published to npm. Build it from a clone and install that:
-
 ```sh
-git clone https://github.com/CrazyCoder/jetcompact
-cd jetcompact && npm install && npm run build && cd ..
-npm install ./jetcompact
+npm install jetcompact
 export TYPESAFE_API_KEY=...
 ```
 

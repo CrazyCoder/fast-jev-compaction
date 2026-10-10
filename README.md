@@ -382,11 +382,13 @@ git tag v0.10.0
 git push origin main v0.10.0
 ```
 
-The Release workflow then checks that the tag matches every declared version and
-publishes a GitHub release with the tag's CHANGELOG section as its notes. It
-fails, and publishes nothing, when they disagree or the section is missing.
-Installed plugins update from the version on `main`, not from the release, so
-push the version bump only when it is ready to ship.
+The Release workflow then checks that the tag matches every declared version,
+publishes the library to npm as `jetcompact` (through npm trusted publishing,
+after the typecheck, the tests and the build pass), and publishes a GitHub
+release with the tag's CHANGELOG section as its notes. It fails, and publishes
+nothing, when the versions disagree, the CHANGELOG section is missing, or a
+check fails. Installed plugins update from the version on `main`, not from the
+release, so push the version bump only when it is ready to ship.
 
 `demo/JevDemo` is a native SwiftUI app (macOS) that plays a scripted, dramatized
 compaction for screen recording; it never calls the API. `demo/JevDemo/build.sh`

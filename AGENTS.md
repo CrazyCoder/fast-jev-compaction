@@ -45,8 +45,10 @@ Only when Serge asks for a release. The steps are in the README under
 [Releasing](README.md#releasing): set the version in the four files
 `npm run check:version` reads, give it a `## [x.y.z]` section in `CHANGELOG.md`,
 commit, then tag and push the tag (`git tag vX.Y.Z`,
-`git push origin main vX.Y.Z`). The Release workflow publishes the GitHub
-release from the tag; a push to `main` alone never releases.
+`git push origin main vX.Y.Z`). The Release workflow publishes the library to
+npm (`jetcompact`, trusted publishing from `release.yml`; never publish from a
+local machine) and the GitHub release from the tag; a push to `main` alone never
+releases.
 
 Installed plugins update from the version on `main`, not from releases: pushing
 a version bump to `main` ships it. Push only when Serge says "push".
