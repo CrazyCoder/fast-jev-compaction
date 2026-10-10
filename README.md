@@ -29,11 +29,15 @@ k-metehan is
 On a replay of real sessions, `oldProse: digest` with `recentTurns: 8` versus
 `keep` took the post-compaction floor from about 155k to about 39k tokens, the
 growth per compaction from +21k to −5k, and the lost-and-needed rate from 1.0%
-to 1.7%. Replaying one 3,400-message session through 21 compactions, verbatim
-prose let the context left after each one climb from 11% to 39% until compaction
-was refused; `digest` with a 100-character head kept it between 9% and 18%. With
-`recall` on, which reads the originals back, those are the defaults; with it
-off, `oldProse` stays `keep` and the head 300 (see [Configure](#configure)).
+to 1.7%. Replaying six real sessions, from a few compactions to a multi-day one
+with 34,000 messages, verbatim prose let the context left after each compaction
+climb until every later one was refused, after two or three. So with `oldProse`
+unset, each compaction keeps old prose verbatim while that frees enough, which
+covers sessions that compact once or twice; when it would be refused, it digests
+old prose instead, with 100-character heads on cut results, and stays on the
+digest for the rest of the session. In the multi-day session that kept the
+context after each compaction between 4% and 26% over 38 compactions (see
+[Configure](#configure)).
 
 ## Install
 
@@ -101,7 +105,7 @@ people touch:
 | Option | Default | Effect |
 | -- | -- | -- |
 | `compactAtPercent` | `60` | Context percentage at which the plugin asks for a compaction |
-| `oldProse` | `digest` with `recall` on, else `keep` | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`) |
+| `oldProse` | unset: verbatim, then `digest` once verbatim would be refused | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`) |
 | `recentTurns` | `8` | User turns kept outside the digest or summary |
 | `builtinFallback` | `auto` | Which compactions fall back to Claude Code's built-in summary when Jev fails or frees too little: `auto` (only its own automatic one), `always`, `never`. Use `always` if Claude Code's own autoCompact is disabled, so `/compact` and plugin requests still get a summary |
 | `targetPercent` | `45` | Gives up the Jev result if the estimated context after compaction would still exceed this percentage |

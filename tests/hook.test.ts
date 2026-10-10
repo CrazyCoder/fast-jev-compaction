@@ -97,8 +97,6 @@ describe('hook config', () => {
       provider: 'jev',
       recall: true,
       sessionIndex: 'auto',
-      oldProse: 'digest',
-      truncateHeadChars: 100,
       compactAtPercent: 60,
       minReductionRatio: 0.25,
       targetPercent: 45,
@@ -121,8 +119,6 @@ describe('hook config', () => {
       provider: 'jev',
       recall: true,
       sessionIndex: 'auto',
-      oldProse: 'digest',
-      truncateHeadChars: 100,
       apiKey: 'k',
       keepThreshold: 0.3,
       maxStateTokens: 1000,
@@ -135,10 +131,7 @@ describe('hook config', () => {
       proseModel: 'haiku',
       targetPercent: 45,
     });
-    // Recall can read back what the digest and short heads cut; without it they stay as the library has them.
-    const off = resolveHookConfig({ recall: false });
-    expect(off.oldProse).toBeUndefined();
-    expect(off.truncateHeadChars).toBeUndefined();
+    // Unset, the hook picks verbatim or digest per compaction (see 'old prose through the hook').
     expect(resolveHookConfig({ oldProse: 'keep', truncateHeadChars: 300 })).toMatchObject({
       oldProse: 'keep',
       truncateHeadChars: 300,
@@ -159,8 +152,7 @@ describe('hook config', () => {
       recentTurns: 5,
       proseModel: 'sonnet',
     });
-    expect(resolveHookConfig({ oldProse: 'maybe', recentTurns: 'x' }).oldProse).toBe('digest');
-    expect(resolveHookConfig({ oldProse: 'maybe', recall: false })).not.toHaveProperty('oldProse');
+    expect(resolveHookConfig({ oldProse: 'maybe', recentTurns: 'x' })).not.toHaveProperty('oldProse');
     expect(resolveHookConfig({})).not.toHaveProperty('recentTurns');
   });
 
@@ -792,10 +784,60 @@ describe('old prose through the hook', () => {
 
   it('keep makes no model call', async () => {
     let called = false;
-    await run({}, async () => {
+    await run({ oldProse: 'keep' }, async () => {
       called = true;
       return 'x';
     });
     expect(called).toBe(false);
+  });
+
+  const digestMarker = /^\[fast-jev-compaction digest of (\d+) earlier turns/;
+  // A result larger than all the prose, which Jev cuts: verbatim prose clears the guards.
+  const shrinkable = () => [
+    ...turns(12),
+    call('big', 'Read', { file_path: 'src/big.ts' }, ''),
+    result('big', 'x'.repeat(50_000)),
+    message('assistant', 'Read it.'),
+    message('user', 'next'),
+  ];
+  async function compactPlain(options: Record<string, unknown>, messages: unknown[]) {
+    const { $, notices } = host(jevFetch(() => 0.1));
+    // threshold: every result Jev scores 0.1 is cut, whatever its size.
+    const out = (await hooks({ preserveRecentMessages: 2, recentTurns: 3, keepMode: 'threshold', ...options })[
+      'session.compact'
+    ]!(
+      $,
+      { trigger: 'manual', messages },
+      async () => ({ messages: [] }),
+    )) as { messages?: { text: string }[]; skip?: string };
+    return { out, notices };
+  }
+
+  it('keeps old prose verbatim by default while that frees enough', async () => {
+    const { out } = await compactPlain({}, shrinkable());
+    expect(out.skip).toBeUndefined();
+    expect(out.messages).toBeDefined();
+    expect(out.messages!.some((m) => digestMarker.test(m.text))).toBe(false);
+  });
+
+  it('digests old prose by default when verbatim prose would be refused', async () => {
+    const { out, notices } = await run({ recentTurns: 3 });
+    expect(out.messages[0]!.text).toMatch(digestMarker);
+    expect(notices.at(-1)).toMatch(/old prose digest: .*; verbatim prose was refused \(below 25% minimum/);
+  });
+
+  it('starts with the digest once the conversation holds one', async () => {
+    const earlier = [
+      message('user', '[fast-jev-compaction digest of 5 earlier turns; tool calls, results and intermediate narration were dropped]\n• first prompt: hi'),
+      message('assistant', 'Understood. Continuing from the earlier-turns digest above.'),
+    ];
+    const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
+    const turnsDigested = Number(digestMarker.exec(out.messages![0]!.text)?.[1]);
+    expect(turnsDigested).toBeGreaterThan(5);
+  });
+
+  it('does not retry an explicit oldProse: keep', async () => {
+    const { out } = await compactPlain({ oldProse: 'keep' }, turns(12));
+    expect(out.skip).toMatch(/below 25% minimum/);
   });
 });

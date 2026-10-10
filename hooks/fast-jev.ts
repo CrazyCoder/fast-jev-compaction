@@ -21,7 +21,7 @@ import {
   recallCommand,
   recallRequest,
 } from '../src/recall/tool.ts';
-import type { ProseSummarizer } from '../src/prose.js';
+import { parseCondensed, type ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
   CompactResult,
@@ -48,15 +48,27 @@ const HOOK_DEFAULTS = {
   proseModel: 'haiku',
 };
 
+/** Characters of a cut result's head once old prose is digested, unless `truncateHeadChars` is set. */
+const DIGEST_HEAD_CHARS = 100;
+
 /**
- * Library options that change when recall is on. Replaying a long session
- * through repeated compactions, verbatim old prose let the context left after
- * each one climb until compaction was refused; the digest kept it bounded.
+ * The old-prose settings each compaction tries in order, the first that clears
+ * the size guards winning. A set `oldProse` is used as it is. Unset, old prose
+ * stays verbatim, which suits sessions that compact once or twice; when that
+ * would be refused, or once the conversation already holds a digest, the old
+ * prose is digested and cut results keep shorter heads. Replaying long
+ * sessions, verbatim prose let each compaction end higher than the last until
+ * compaction was refused for good; switching to the digest kept it bounded.
  */
-const RECALL_DEFAULTS = {
-  oldProse: 'digest' as const,
-  truncateHeadChars: 100,
-};
+export function prosePlans(config: HookConfig, messages: readonly Message[]): Partial<CompactOptions>[] {
+  if (config.oldProse) return [{}];
+  const digest: Partial<CompactOptions> = {
+    oldProse: 'digest',
+    truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
+  };
+  if (messages.some((message) => parseCondensed(message))) return [digest];
+  return [{ oldProse: 'keep' }, digest];
+}
 
 /**
  * Percentage points the context must grow by after a skipped `turn.complete`
@@ -190,12 +202,6 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     proseModel: optionString(options, 'proseModel') ?? HOOK_DEFAULTS.proseModel,
   };
   if (config.compactionTimeoutMs <= 0) config.compactionTimeoutMs = HOOK_DEFAULTS.compactionTimeoutMs;
-  // With recall the model can read back what the digest and short heads cut,
-  // and verbatim old prose is what makes each compaction end higher than the last.
-  if (config.recall) {
-    config.oldProse ??= RECALL_DEFAULTS.oldProse;
-    config.truncateHeadChars ??= RECALL_DEFAULTS.truncateHeadChars;
-  }
   // `apiKey` and `baseUrl` belong to Jev: with openai they are ignored, so a
   // TypeSafe key or a Jev gateway never receives an OpenAI request, and the
   // OpenAI key comes from OPENAI_API_KEY alone.
@@ -697,80 +703,100 @@ export const register: Register = (on: On, options: PluginOptions) => {
         apiKey: await getApiKey($, configured),
         instructions: event.instructions,
       };
-      let redacted = 0;
-      const { result, messages } = await withCompactionDeadline(
-        () =>
-          compactSession(
-            event.messages,
-            config,
-            async (url, init) => {
-              const response = await $.http.fetch(url, init);
-              return { status: response.status, ok: response.ok, text: response.text };
-            },
-            (count) => {
-              redacted += count;
-            },
-            async ({ system, prompt, maxTokens }) => {
-              const reply = await $.model.complete({ model: config.proseModel, system, prompt, maxTokens });
-              if (!reply.isAnswered) throw new Error(`prose model did not answer (${reply.reason})`);
-              return reply.text;
-            },
-            (ms) => $.clock.sleep(ms),
-          ),
-        config.compactionTimeoutMs,
-        (ms, options) => $.clock.sleep(ms, options),
-      );
-      debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
-      for (const line of decisionLogLines(result)) debugLog($, line);
-      // Rows go back without handles, which costs them their hidden content:
-      // read it from the API form and fold it back in as text, before the
-      // size guards so they measure what is returned. Content after a result
-      // Jev cut is cut the same way. Transient reminders an earlier fold left
-      // in the rows go first.
-      const cleaned = dropTransientReminders(messages);
-      let returned = cleaned.messages;
-      const afterCleaning = result.stats.charsAfter - cleaned.chars;
-      let measured = { ...result, stats: { ...result.stats, charsAfter: afterCleaning } };
-      let hiddenNote = cleaned.chars > 0 ? `; ${cleaned.chars} chars of stale reminders dropped` : '';
-      try {
-        const view = await $.session.messages({ as: 'api' });
-        const cutIds = new Set(
-          result.decisions.filter((d) => d.action !== 'keep' && d.reason !== 'pinned').map((d) => d.id),
+      // A retry with the digest asks Jev much the same questions: each answered
+      // request is sent once. A failed one is not kept, so its retry goes out.
+      const answers = new Map<string, Promise<HookFetchResponse>>();
+      const fetchOnce = (url: string, init?: HookFetchInit): Promise<HookFetchResponse> => {
+        const key = `${url}\n${init?.body ?? ''}`;
+        const known = answers.get(key);
+        if (known) return known;
+        const answer = $.http
+          .fetch(url, init)
+          .then((r: HookFetchResponse) => ({ status: r.status, ok: r.ok, text: r.text }));
+        answers.set(key, answer);
+        answer.then(
+          (r) => r.ok || answers.delete(key),
+          () => answers.delete(key),
         );
-        const fold = foldHiddenContent(cleaned.messages, hiddenContent(event.messages, view as ApiMessage[]), {
-          cutIds,
-          headChars: resolveOptions(config).truncateHeadChars,
-        });
-        returned = fold.messages;
-        measured = { ...result, stats: { ...result.stats, charsAfter: afterCleaning + fold.chars } };
-        hiddenNote += `; hidden content: ${fold.folded} folded back (${fold.chars} chars)${
-          fold.lost > 0 ? `, ${fold.lost} lost` : ''
-        }`;
-      } catch (error) {
-        hiddenNote += `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
-      }
-      if (reductionRatio(measured) < config.minReductionRatio) {
-        return giveUp(`below ${percent(config.minReductionRatio)} minimum: ${summarize(measured)}${hiddenNote}`);
-      }
+        return answer;
+      };
       let percentBefore: number | undefined;
       try {
         percentBefore = (await $.session.usage()).context.percent;
       } catch {
         percentBefore = undefined;
       }
-      const estimate = estimatePostCompactPercent(percentBefore, measured.stats);
-      if (exceedsTarget(estimate, config.targetPercent)) {
-        return giveUp(
-          `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target: ${summarize(measured)}${hiddenNote}`,
+      let refusal = '';
+      let refusedBecause = '';
+      for (const [attempt, plan] of prosePlans(configured, event.messages).entries()) {
+        const planned = { ...config, ...plan };
+        let redacted = 0;
+        const { result, messages } = await withCompactionDeadline(
+          () =>
+            compactSession(
+              event.messages,
+              planned,
+              fetchOnce,
+              (count) => {
+                redacted += count;
+              },
+              async ({ system, prompt, maxTokens }) => {
+                const reply = await $.model.complete({ model: config.proseModel, system, prompt, maxTokens });
+                if (!reply.isAnswered) throw new Error(`prose model did not answer (${reply.reason})`);
+                return reply.text;
+              },
+              (ms) => $.clock.sleep(ms),
+            ),
+          config.compactionTimeoutMs,
+          (ms, options) => $.clock.sleep(ms, options),
         );
+        debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
+        for (const line of decisionLogLines(result)) debugLog($, line);
+        // Rows go back without handles, which costs them their hidden content:
+        // read it from the API form and fold it back in as text, before the
+        // size guards so they measure what is returned. Content after a result
+        // Jev cut is cut the same way. Transient reminders an earlier fold left
+        // in the rows go first.
+        const cleaned = dropTransientReminders(messages);
+        let returned = cleaned.messages;
+        const afterCleaning = result.stats.charsAfter - cleaned.chars;
+        let measured = { ...result, stats: { ...result.stats, charsAfter: afterCleaning } };
+        let hiddenNote = cleaned.chars > 0 ? `; ${cleaned.chars} chars of stale reminders dropped` : '';
+        try {
+          const view = await $.session.messages({ as: 'api' });
+          const cutIds = new Set(
+            result.decisions.filter((d) => d.action !== 'keep' && d.reason !== 'pinned').map((d) => d.id),
+          );
+          const fold = foldHiddenContent(cleaned.messages, hiddenContent(event.messages, view as ApiMessage[]), {
+            cutIds,
+            headChars: resolveOptions(planned).truncateHeadChars,
+          });
+          returned = fold.messages;
+          measured = { ...result, stats: { ...result.stats, charsAfter: afterCleaning + fold.chars } };
+          hiddenNote += `; hidden content: ${fold.folded} folded back (${fold.chars} chars)${
+            fold.lost > 0 ? `, ${fold.lost} lost` : ''
+          }`;
+        } catch (error) {
+          hiddenNote += `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
+        }
+        const estimate = estimatePostCompactPercent(percentBefore, measured.stats);
+        if (reductionRatio(measured) < config.minReductionRatio) {
+          refusedBecause = `below ${percent(config.minReductionRatio)} minimum`;
+        } else if (exceedsTarget(estimate, config.targetPercent)) {
+          refusedBecause = `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target`;
+        } else {
+          const retried = attempt > 0 ? `; verbatim prose was refused (${refusedBecause})` : '';
+          await notify(
+            $,
+            event.trigger,
+            `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(measured)})${hiddenNote}${retried}`,
+            `compacted, ${percent(reductionRatio(measured))} smaller (${messages.length}/${event.messages.length} messages)`,
+          );
+          return { messages: withoutHandles(returned) };
+        }
+        refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }
-      await notify(
-        $,
-        event.trigger,
-        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(measured)})${hiddenNote}`,
-        `compacted, ${percent(reductionRatio(measured))} smaller (${messages.length}/${event.messages.length} messages)`,
-      );
-      return { messages: withoutHandles(returned) };
+      return giveUp(refusal);
     } catch (error) {
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
         await notify($, event.trigger, `not compacted (${error.message})`, `not compacted (${toastReason(error.message)})`);

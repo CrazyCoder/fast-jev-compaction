@@ -70,11 +70,11 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 | `maxStateTokens` | `25000` |
 | `maxRequestTokens` | `30000` |
 | `maxConcurrentRequests` | `4` |
-| `truncateHeadChars` | `100` with `recall` on, else `300` |
+| `truncateHeadChars` | `300`, `100` once old prose is digested |
 | `dropCalls` | `false` |
 | `trimHostText` | `true` |
 | `hostTextHeadChars` | `200` |
-| `oldProse` | `digest` with `recall` on, else `keep` (`summarize`) |
+| `oldProse` | unset: `keep`, then `digest` (`summarize`) |
 | `recentTurns` | `8` |
 | `proseModel` | `haiku` (`summarize` only) |
 | `taskResultHeadChars` | `4000` |

@@ -48,10 +48,12 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
   auto-compacts) go to the debug log only; the user sees one short toast.
 - Type reference from Claude Code 2.1.292.
 - Marketplace renamed to `crazycoder`.
-- With `recall` on, `oldProse` defaults to `digest` and `truncateHeadChars` to
-  100, so the context left after each compaction stays bounded in long sessions
-  instead of climbing until compaction is refused. With `recall` off they stay
-  `keep` and 300.
+- With `oldProse` unset, each compaction keeps old prose verbatim while that
+  clears the size guards; when it would be refused, it digests old prose instead
+  (`truncateHeadChars` 100 unless set) and keeps digesting for the rest of the
+  session. Long sessions no longer climb until every compaction is refused, and
+  short ones keep their prose verbatim. Jev requests repeated by the retry are
+  sent once.
 
 ### Fixed
 
