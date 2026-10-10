@@ -27,6 +27,8 @@ export type RecallRequest = {
   offset?: number;
   /** true: the files changed, by which calls; a path part: every call on the files it matches. */
   touched?: boolean | string;
+  /** Subagent transcripts: "list", "all" (with the session's own), or a part of an agent's id or name. */
+  agent?: string;
 };
 
 export type RecallDeps = {
@@ -186,7 +188,10 @@ const clip = (text: string, chars: number): string => (text.length <= chars ? te
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 function heading(entry: Entry): string {
-  return entry.kind === 'call' ? `#${entry.n} call ${entry.tool} (${entry.id})` : `#${entry.n} ${entry.kind}`;
+  const where = entry.agent ? ` [${entry.agent}]` : '';
+  if (entry.kind !== 'call') return `#${entry.n}${where} ${entry.kind}`;
+  const started = entry.agentId ? ` [started agent ${entry.agentId}]` : '';
+  return `#${entry.n}${where} call ${entry.tool} (${entry.id})${started}`;
 }
 
 /** The input field that says most about a call, for one-line listings. */
@@ -242,10 +247,9 @@ function runRange(entries: readonly Entry[], [from, to]: readonly [number, numbe
   const picked = entries.filter((e) => e.n >= Math.min(from, to) && e.n <= Math.max(from, to));
   if (picked.length === 0) return `No entries in #${from}..#${to} (the session has ${entries.length}).`;
   const p = pager(picked.length, RANGE_PAGE, page);
-  const lines = picked.slice(p.from, p.from + RANGE_PAGE).map((entry) => {
-    const text = entry.kind === 'call' ? `${entry.tool} (${entry.id}): ${gist(entry)}` : entry.text;
-    return `#${entry.n} ${entry.kind} ${clip(oneLine(text), PREVIEW_CHARS)}`;
-  });
+  const lines = picked
+    .slice(p.from, p.from + RANGE_PAGE)
+    .map((entry) => `${heading(entry)}${entry.kind === 'call' ? ':' : ''} ${clip(oneLine(entry.kind === 'call' ? gist(entry) : entry.text), PREVIEW_CHARS)}`);
   const next = p.page < p.pages ? `\nNext: page: ${p.page + 1}.` : '';
   return `Entries #${from}..#${to}, page ${p.page}/${p.pages}:\n${lines.join('\n')}${next}`;
 }

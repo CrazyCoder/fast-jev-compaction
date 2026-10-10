@@ -13,10 +13,14 @@
  */
 
 export type Entry =
-  | { n: number; kind: 'prompt' | 'reply'; text: string }
+  | { n: number; kind: 'prompt' | 'reply'; text: string; agent?: string }
   | {
       n: number;
       kind: 'call';
+      /** The subagent whose transcript holds it, as `type: description`; absent for the session's own. */
+      agent?: string;
+      /** For an Agent call: the subagent it started. */
+      agentId?: string;
       id: string;
       tool: string;
       input: Record<string, unknown>;
@@ -56,8 +60,12 @@ function textOf(content: unknown): string {
     .join('\n');
 }
 
-/** Reads transcript lines one at a time; `entries` grows as they come. */
-export function transcriptReader(): { line: (raw: string) => void; entries: Entry[] } {
+/**
+ * Reads transcript lines one at a time; `entries` grows as they come. A
+ * subagent's transcript holds only sidechain rows, so `sidechain` takes them;
+ * the session's own transcript skips them.
+ */
+export function transcriptReader({ sidechain = false } = {}): { line: (raw: string) => void; entries: Entry[] } {
   const entries: Entry[] = [];
   const calls = new Map<string, Call>();
   /** Each prompt or reply seen, keyed by its text and the entry before it, to an id. */
@@ -106,7 +114,8 @@ export function transcriptReader(): { line: (raw: string) => void; entries: Entr
       previous = '';
       return;
     }
-    if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isSidechain || row.isCompactSummary) return;
+    if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isCompactSummary) return;
+    if (row.isSidechain && !sidechain) return;
     const content = row.message?.content;
     const blocks: Block[] = Array.isArray(content) ? (content as Block[]) : [];
     if (row.type === 'user') {
@@ -126,8 +135,8 @@ export function transcriptReader(): { line: (raw: string) => void; entries: Entr
 }
 
 /** Entries from a whole transcript's text. */
-export function readTranscript(jsonl: string): Entry[] {
-  const reader = transcriptReader();
+export function readTranscript(jsonl: string, options: { sidechain?: boolean } = {}): Entry[] {
+  const reader = transcriptReader(options);
   for (const raw of jsonl.split('\n')) reader.line(raw);
   return reader.entries;
 }

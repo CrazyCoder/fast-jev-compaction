@@ -207,6 +207,11 @@ copies after each boundary, and keeps each call's first, uncut result:
   changed, newest change first, with the last five calls on each; a part of a
   path lists every call on the files it matches, reads included. 50 lines per
   page.
+- `agent`: subagents keep their own transcripts under `<session>/subagents/`.
+  `"list"` names them with the Agent call that started each; a part of an
+  agent's id or name runs the request on that agent's transcript, `"all"` on the
+  session's and every agent's. `expand` finds a subagent call by its tool_use_id
+  without it, and an Agent call shows the agent it started.
 
 An answer holds at most 48,000 characters, shared between expanded entries.
 Recall's own calls are not listed. Cut notes end with

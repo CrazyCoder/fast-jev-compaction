@@ -152,5 +152,6 @@ describe('recall requests', () => {
     expect(recallRequest({ touched: true })).toEqual({ touched: true });
     expect(recallRequest({ touched: 'app.ts' })).toEqual({ touched: 'app.ts' });
     expect(recallRequest({ touched: 1 })).toEqual({});
+    expect(recallRequest({ query: 'x', agent: 'all' })).toEqual({ query: 'x', agent: 'all' });
   });
 });

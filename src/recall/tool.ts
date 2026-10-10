@@ -23,6 +23,7 @@ export const RECALL_DESCRIPTION = [
   '- range: [from, to]: entries #from..#to in order, one line each.',
   '- touched: true for the files changed in this session and the calls that changed them; a part of a path for every call on the files it matches, reads included.',
   'Add page for more query, range or touched results, and offset to continue a long expand.',
+  'Subagents keep their own transcripts: agent: "list" names them; agent: "<id or part of its name>" runs the request on one, agent: "all" on the session and all of them. expand finds a subagent call by its tool_use_id without it.',
   'A compaction note names the tool_use_id to expand. A tool_use_id always names the same call; #N can shift as the session grows.',
 ].join('\n');
 
@@ -39,6 +40,10 @@ export const RECALL_INPUT_SCHEMA = {
     touched: {
       type: ['boolean', 'string'],
       description: 'true: files changed and by which calls; a part of a path: every call on the files it matches.',
+    },
+    agent: {
+      type: 'string',
+      description: 'Subagent transcripts: "list", "all" (with this session), or a part of an agent id or name.',
     },
     page: { type: 'number', description: 'Page of query, range or touched results, from 1.' },
     offset: { type: 'number', description: 'For expand: where to continue, from a cut note.' },
@@ -57,6 +62,7 @@ export function recallRequest(e: Record<string, unknown>): RecallRequest {
     ...(number(e['page']) !== undefined && { page: number(e['page']) }),
     ...(number(e['offset']) !== undefined && { offset: number(e['offset']) }),
     ...((e['touched'] === true || typeof e['touched'] === 'string') && { touched: e['touched'] as true | string }),
+    ...(typeof e['agent'] === 'string' && { agent: e['agent'] }),
   };
 }
 

@@ -13,8 +13,9 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
   (`mcp__fast-jev-compaction__recall`) over the session transcript, with `query`
   (BM25 or regex), `expand` (by `#N` or tool_use_id, the uncut result, saved
   large outputs included), `range` and `touched` (files changed, or every call
-  on a file), in answers of at most 48k characters. Cut notes name the recall
-  call instead of "re-run the tool" (`recallNotes` in the library).
+  on a file), in answers of at most 48k characters; `agent` runs a request on
+  subagent transcripts. Cut notes name the recall call instead of "re-run the
+  tool" (`recallNotes` in the library).
 - `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
   SHA-256 on first use, which runs the recall tool; CI checks the line endings
   of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.

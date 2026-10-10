@@ -54,6 +54,12 @@ describe('readTranscript', () => {
     expect(entries[1]).toMatchObject({ result: FULL });
   });
 
+  it('reads sidechain rows when asked, as a subagent transcript holds only those', () => {
+    const lines = [row('user', 'Research it.', { isSidechain: true }), row('assistant', [{ type: 'text', text: 'Found it.' }], { isSidechain: true })];
+    expect(readTranscript(lines.join('\n'))).toEqual([]);
+    expect(readTranscript(lines.join('\n'), { sidechain: true }).map((e) => e.kind)).toEqual(['prompt', 'reply']);
+  });
+
   it('keeps a short prompt said again later, after other work', () => {
     const entries = readTranscript(
       [prompt('yes'), reply('ok'), call('t1'), result('t1', 'x'), prompt('yes'), reply('ok')].join('\n'),

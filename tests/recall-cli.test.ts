@@ -71,6 +71,53 @@ describe('recall in Node', () => {
   });
 });
 
+describe('recall in subagent transcripts', () => {
+  /** The session above plus an Agent call t3 whose subagent read the cache config. */
+  function withAgent(): string {
+    const { dir } = configDir();
+    const project = join(dir, 'projects', 'C--work-app');
+    const agentRow = { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't3', name: 'Agent', input: { description: 'Find the cache config' } }] } };
+    writeFileSync(join(project, `${SESSION}.jsonl`), `\n${JSON.stringify(agentRow)}`, { flag: 'a' });
+    const agents = join(project, SESSION, 'subagents');
+    mkdirSync(agents, { recursive: true });
+    const sidechain = (type: string, content: unknown) => JSON.stringify({ type, isSidechain: true, message: { content } });
+    writeFileSync(
+      join(agents, 'agent-abc123.jsonl'),
+      [
+        sidechain('user', 'Find where the cache timeout is set.'),
+        sidechain('assistant', [{ type: 'tool_use', id: 's1', name: 'Grep', input: { pattern: 'timeout' } }]),
+        sidechain('user', [{ type: 'tool_result', tool_use_id: 's1', content: 'config/cache.yml:3: timeout: 5' }]),
+        sidechain('assistant', [{ type: 'text', text: 'The timeout is in config/cache.yml.' }]),
+      ].join('\n'),
+    );
+    writeFileSync(join(agents, 'agent-abc123.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'Find the cache config', toolUseId: 't3' }));
+    return dir;
+  }
+  const ask = (dir: string, request: Record<string, unknown>) => answer({ configDir: dir, sessionId: SESSION, request });
+
+  it('lists the subagents with the call that started each', async () => {
+    expect(await ask(withAgent(), { agent: 'list' })).toBe(
+      ['Subagents of this session (1):', 'abc123 Explore: Find the cache config (started by t3; 3 entries)', 'Search one with agent: "<id or part of its name>", or all with agent: "all".'].join('\n'),
+    );
+  });
+
+  it('searches one subagent, or the session and all subagents', async () => {
+    const dir = withAgent();
+    const one = await ask(dir, { query: 'cache.yml', agent: 'cache config' });
+    expect(one).toMatch(/^#\d+ \[Explore: Find the cache config\] call Grep \(s1\)/m);
+    const all = await ask(dir, { query: 'timeout', agent: 'all' });
+    expect(all).toContain('[Explore: Find the cache config]');
+    expect(all).toMatch(/^#1 prompt/m);
+    expect(await ask(dir, { query: 'x', agent: 'nope' })).toBe('No subagent matches "nope". agent: "list" shows them.');
+  });
+
+  it('expands a subagent call by its id from the session view, and shows which agent an Agent call started', async () => {
+    const dir = withAgent();
+    expect(await ask(dir, { expand: ['s1'] })).toContain('config/cache.yml:3: timeout: 5');
+    expect(await ask(dir, { expand: ['t3'] })).toContain('call Agent (t3) [started agent abc123]');
+  });
+});
+
 describe('recallCommand', () => {
   it('runs tools/node.cmd with bash on Linux and macOS', () => {
     expect(recallCommand('/home/me/.claude/plugins/cache/x/fast-jev-compaction/0.9.0')).toEqual({
