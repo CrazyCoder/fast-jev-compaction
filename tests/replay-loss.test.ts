@@ -32,24 +32,22 @@ describe('extractTokens', () => {
 describe('detectLoss', () => {
   const big = 'export const SECRET_TOKEN_NAME = 1; path /repo/src/deep/module_name.ts';
   const degraded = [{ tool_use_id: 'a', tool: 'Read', input: { file_path: 'x' }, resultText: big }];
+  /** A Read whose result holds the tokens, then an Edit that types one of them. */
+  const readThenEdit = () => [
+    assistant('', [call('a', 'Read', { file_path: 'x' })]),
+    user('', [{ tool_use_id: 'a', text: big }]),
+    assistant('', [call('b', 'Edit', { file_path: '/repo/src/deep/module_name.ts' })]),
+  ];
 
   it('flags a lost token the model later types into a call before seeing it again', () => {
-    const original = [
-      assistant('', [call('a', 'Read', { file_path: 'x' })]),
-      user('', [{ tool_use_id: 'a', text: big }]),
-      assistant('', [call('b', 'Edit', { file_path: '/repo/src/deep/module_name.ts' })]),
-    ];
+    const original = readThenEdit();
     const [verdict] = detectLoss({ original, from: 2, compacted: [original[0]!], degraded });
     expect(verdict!.lostAndNeeded).toBe(true);
     expect(verdict!.neededTokens).toBeGreaterThan(0);
   });
 
   it('does not count a token the compacted history still holds', () => {
-    const original = [
-      assistant('', [call('a', 'Read', { file_path: 'x' })]),
-      user('', [{ tool_use_id: 'a', text: big }]),
-      assistant('', [call('b', 'Edit', { file_path: '/repo/src/deep/module_name.ts' })]),
-    ];
+    const original = readThenEdit();
     const compacted = [assistant('kept /repo/src/deep/module_name.ts and SECRET_TOKEN_NAME')];
     const [verdict] = detectLoss({ original, from: 2, compacted, degraded });
     expect(verdict!.lostAndNeeded).toBe(false);
@@ -81,11 +79,7 @@ describe('detectLoss', () => {
   });
 
   it('never looks past `until`', () => {
-    const original = [
-      assistant('', [call('a', 'Read', { file_path: 'x' })]),
-      user('', [{ tool_use_id: 'a', text: big }]),
-      assistant('', [call('b', 'Edit', { file_path: '/repo/src/deep/module_name.ts' })]),
-    ];
+    const original = readThenEdit();
     const args = { original, from: 2, compacted: [original[0]!], degraded };
     expect(detectLoss({ ...args, until: 2 })[0]!.lostAndNeeded).toBe(false);
     expect(detectLoss({ ...args, until: 3 })[0]!.lostAndNeeded).toBe(true);

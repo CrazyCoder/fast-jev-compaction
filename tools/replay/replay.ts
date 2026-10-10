@@ -217,6 +217,16 @@ async function runPoint(
   };
 }
 
+/** Replays the compaction points of one transcript segment with one asker factory. */
+type SegmentReplay = (
+  parsed: ParsedTranscript,
+  segment: number,
+  range: { start: number; end: number },
+  config: ReplayConfig,
+  factory: AskerFactory,
+  tally: { unscored: number; errors: number },
+) => Promise<PointResult[]>;
+
 /**
  * `threshold` points: replays a segment message by message on a working history. Each time its
  * estimate passes `thresholdTokens` (and has grown `minGrowthTokens` since the last floor, with no
@@ -224,14 +234,7 @@ async function runPoint(
  * compacted one and the next original messages are appended to it, so the floor growth across
  * successive points is the real recurrence, not a re-compaction of the untouched prefix.
  */
-async function replayThreshold(
-  parsed: ParsedTranscript,
-  segment: number,
-  range: { start: number; end: number },
-  config: ReplayConfig,
-  factory: AskerFactory,
-  tally: { unscored: number; errors: number },
-): Promise<PointResult[]> {
+const replayThreshold: SegmentReplay = async (parsed, segment, range, config, factory, tally) => {
   const points: PointResult[] = [];
   const degraded = new Set<string>();
   let working: Message[] = [];
@@ -268,7 +271,7 @@ async function replayThreshold(
     }
   }
   return points;
-}
+};
 
 /**
  * `recorded` points: the compactions the hook really logged (they coincide with the compact
@@ -276,14 +279,7 @@ async function replayThreshold(
  * messages up to the log entry (no sequential state: earlier in-place compactions are not
  * re-simulated), so floors are comparable across askers but not a growth recurrence.
  */
-async function replayRecorded(
-  parsed: ParsedTranscript,
-  segment: number,
-  range: { start: number; end: number },
-  config: ReplayConfig,
-  factory: AskerFactory,
-  tally: { unscored: number; errors: number },
-): Promise<PointResult[]> {
+const replayRecorded: SegmentReplay = async (parsed, segment, range, config, factory, tally) => {
   const points: PointResult[] = [];
   for (const event of parsed.recorded) {
     if (event.messageIndex <= range.start || event.messageIndex > range.end) continue;
@@ -303,7 +299,7 @@ async function replayRecorded(
     }
   }
   return points;
-}
+};
 
 export async function replaySession(
   session: string,
