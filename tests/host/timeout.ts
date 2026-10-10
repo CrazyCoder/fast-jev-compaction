@@ -9,7 +9,9 @@ function transcript(): SessionMessage[] {
       toolUses: [{ tool_use_id: `call-${i}`, tool: 'Read', input: { file_path: 'x.ts' } }],
     }, {
       role: 'user', text: '', toolUses: [],
-      toolResults: [{ tool_use_id: `call-${i}`, text: 'x'.repeat(2000), isError: false }],
+      // Each result alone is over the default rank budget (keepResultTokens),
+      // so a compaction that gets Jev's answers truncates them.
+      toolResults: [{ tool_use_id: `call-${i}`, text: 'x'.repeat(80_000), isError: false }],
     });
   }
   return messages;
@@ -20,6 +22,8 @@ function host(on: On) {
   mock.env(on, { TYPESAFE_API_KEY: 'test-key' });
   on('ui.log', () => ({ value: undefined }));
   on('ui.toast', () => ({ value: undefined }));
+  // The API form the hook reads hidden content from: none here.
+  on('session.messages', () => ({ value: [] }));
   const state = { stall: true, fetches: 0, summaries: 0 };
   on('http.fetch', async (_$, event) => {
     state.fetches += 1;
