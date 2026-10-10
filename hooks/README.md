@@ -55,6 +55,7 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 | -- | -: |
 | `provider` | `jev` (`openai`) |
 | `recall` | `true` |
+| `sessionIndex` | `auto` (`off`) |
 | `model` | `jev-latest` (`gpt-6-luna` with `openai`) |
 | `keepMode` | `rank` |
 | `keepThreshold` | `0.5` (threshold mode only) |
@@ -214,6 +215,17 @@ copies after each boundary, and keeps each call's first, uncut result:
   (any keyword when none holds all); ripgrep picks those transcripts when it is
   on the PATH, and only their matching lines are read. Each hit is labelled with
   the project, the date, the session title (or first prompt) and the session id.
+  With qmd installed and `sessionIndex: "auto"` (the default), the search goes
+  through a qmd index instead: each transcript is exported as markdown to
+  `<config dir>/fast-jev-compaction/sessions/<project>/<session>.md` (prompts,
+  replies, calls with the head of their results) and indexed in a qmd index of
+  its own, `fast-jev-sessions` (`~/.cache/qmd/fast-jev-sessions.sqlite`,
+  `~/.config/qmd/fast-jev-sessions.yml`), apart from the default one. The first
+  search builds it in the background and is answered by the scan; later searches
+  re-export the sessions that changed, update the index and return one hit per
+  session. The markdown copies stay when Claude Code removes old transcripts;
+  delete the folder to drop them. On Windows the npm `qmd.cmd` shim is run as
+  its script under the shim's own Node. `sessionIndex: "off"` always scans.
 - `session: "<id or its first 8+ characters>"` runs `query`, `expand`, `range`,
   `touched` or `agent` on that session instead of this one.
 - `agent`: subagents keep their own transcripts under `<session>/subagents/`.

@@ -32,15 +32,27 @@ const FOOTER = 'Open one with session: "<id>" and query, expand, range or touche
 /** A hit a session index found: where it is and the lines around it. */
 export type IndexedHit = { sessionId: string; where: string; heading: string; snippet: string };
 
-/** A ready index answers with hits in the sessions of `slugs`; undefined while it is not ready. */
-export type SessionIndex = (query: string, slugs: ReadonlySet<string>, exclude: string) => IndexedHit[] | undefined;
+/**
+ * A ready index answers with hits in the sessions of the projects `slugs`,
+ * the session `exclude` left out; undefined while it is not ready.
+ */
+export type SessionIndex = (
+  query: string,
+  slugs: ReadonlySet<string>,
+  exclude: string,
+) => Promise<IndexedHit[] | undefined>;
+
+/** A session's title: its custom title, else its first prompt, on one line. */
+export function sessionTitle(meta: SessionMeta): string {
+  return oneLine(meta.title ?? meta.firstPrompt ?? 'untitled', TITLE_CHARS);
+}
 
 /** The label of a session's hits: project, date, title and id. */
-export function sessionLabel(project: string, mtimeMs: number, meta: SessionMeta, id: string): string {
-  const title = meta.title ?? oneLine(meta.firstPrompt ?? 'untitled', TITLE_CHARS);
-  const date = new Date(mtimeMs).toISOString().slice(0, 10);
-  return `${project} · ${date} · "${oneLine(title, TITLE_CHARS)}" · ${id}`;
+export function sessionLabel(project: string, date: string, title: string, id: string): string {
+  return `${project} · ${date} · "${title}" · ${id}`;
 }
+
+export const dateOf = (mtimeMs: number) => new Date(mtimeMs).toISOString().slice(0, 10);
 
 /** The transcripts in `dirs` that ripgrep finds `term` in; undefined when ripgrep does not run. */
 function filesWith(rg: string, dirs: readonly string[], term: string): string[] | undefined {
@@ -142,7 +154,7 @@ export async function searchSessions(
     if (picked.length === 0) return `No project matches "${oneLine(project!, 60)}".`;
   }
   const exclude = basename(currentFile, '.jsonl');
-  const indexed = index?.(query, new Set(picked.map((p) => p.slug)), exclude);
+  const indexed = await index?.(query, new Set(picked.map((p) => p.slug)), exclude);
   if (indexed) return indexedAnswer(indexed, query, page, scope);
 
   for (const p of picked) {
@@ -166,7 +178,12 @@ export async function searchSessions(
   const entries: Entry[] = [];
   for (const { file, hits } of complete.length > 0 ? complete : scanned) {
     const owner = picked.find((p) => file.startsWith(p.dir));
-    const where = sessionLabel(owner ? projectName(owner) : '?', statSync(file).mtimeMs, hits.meta, basename(file, '.jsonl'));
+    const where = sessionLabel(
+      owner ? projectName(owner) : '?',
+      dateOf(statSync(file).mtimeMs),
+      sessionTitle(hits.meta),
+      basename(file, '.jsonl'),
+    );
     for (const entry of hits.entries) entries.push({ ...entry, n: entries.length + 1, where });
   }
   const sessionsIn = (hits: readonly Entry[]) => new Set(hits.map((h) => h.where)).size;

@@ -48,8 +48,10 @@ export function noteMeta(line: string, meta: SessionMeta): void {
   }
   if (meta.cwd === undefined && typeof row.cwd === 'string') meta.cwd = row.cwd;
   const content = row.message?.content;
-  if (meta.firstPrompt === undefined && row.type === 'user' && typeof content === 'string' && content.trim()) {
-    meta.firstPrompt = content.trim();
+  // A prompt that opens with a tag is a host block (a command caveat, a slash command), not typed words.
+  const typed = typeof content === 'string' ? content.trim() : '';
+  if (meta.firstPrompt === undefined && row.type === 'user' && typed && !typed.startsWith('<')) {
+    meta.firstPrompt = typed;
   }
 }
 
@@ -74,10 +76,19 @@ export function projectName(project: Project): string {
   return project.cwd ? basename(project.cwd.replace(/[\\/]+$/, '').replace(/\\/g, '/')) : project.slug;
 }
 
-export async function readEntries(file: string, sidechain = false): Promise<Entry[]> {
+/** A transcript's entries and meta, in one read. */
+export async function readSession(file: string, sidechain = false): Promise<{ entries: Entry[]; meta: SessionMeta }> {
   const reader = transcriptReader({ sidechain });
-  for await (const line of lines(file)) reader.line(line);
-  return reader.entries;
+  const meta: SessionMeta = {};
+  for await (const line of lines(file)) {
+    noteMeta(line, meta);
+    reader.line(line);
+  }
+  return { entries: reader.entries, meta };
+}
+
+export async function readEntries(file: string, sidechain = false): Promise<Entry[]> {
+  return (await readSession(file, sidechain)).entries;
 }
 
 export function oneLine(text: string, max: number): string {

@@ -76,6 +76,12 @@
       "description": "Offer the model a recall tool that searches the session transcript and reads back what compaction cut. It runs on a pinned Node that tools/node.cmd downloads on first use.",
       "default": true
     },
+    "sessionIndex": {
+      "type": "string",
+      "title": "Session index",
+      "description": "auto: when qmd is installed, recall's search across past sessions uses a qmd index of them (markdown copies under <config dir>/fast-jev-compaction/sessions/, a qmd index named fast-jev-sessions); off: it always scans the transcripts.",
+      "default": "auto"
+    },
     "dropCalls": {
       "type": "boolean",
       "title": "Drop whole tool calls",

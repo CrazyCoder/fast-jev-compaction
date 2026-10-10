@@ -86,6 +86,8 @@ export type HookConfig = CompactOptions & {
   builtinFallback: BuiltinFallback;
   /** Offer the recall tool, and point cut notes at it (default true). */
   recall: boolean;
+  /** Recall's cross-session search through a qmd index when qmd is installed (`auto`, default), or never (`off`). */
+  sessionIndex: 'auto' | 'off';
   /** Model alias or id `oldProse: 'summarize'` writes its summary with, through the session's own client. */
   proseModel: string;
 };
@@ -174,6 +176,7 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     compactionTimeoutMs: optionNumber(options, 'compactionTimeoutMs', HOOK_DEFAULTS.compactionTimeoutMs),
     builtinFallback: optionFallback(options),
     recall: options['recall'] !== false,
+    sessionIndex: options['sessionIndex'] === 'off' ? 'off' : 'auto',
     proseModel: optionString(options, 'proseModel') ?? HOOK_DEFAULTS.proseModel,
   };
   if (config.compactionTimeoutMs <= 0) config.compactionTimeoutMs = HOOK_DEFAULTS.compactionTimeoutMs;
@@ -638,7 +641,8 @@ export const register: Register = (on: On, options: PluginOptions) => {
         const base = await configDir($);
         if (!base) return { result: 'Recall failed: no config dir (CLAUDE_CONFIG_DIR, HOME or USERPROFILE).' };
         const request = recallRequest(e as Record<string, unknown>);
-        const run = await runRecallCli($, JSON.stringify({ configDir: base, sessionId: await $.session.id(), request }));
+        const input = { configDir: base, sessionId: await $.session.id(), request, sessionIndex: configured.sessionIndex };
+        const run = await runRecallCli($, JSON.stringify(input));
         if (run.exitCode !== 0) return { result: `Recall failed: ${(run.stderr || run.stdout).trim().slice(0, 500)}` };
         return { result: run.stdout };
       } catch (error) {

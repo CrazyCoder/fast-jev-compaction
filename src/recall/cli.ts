@@ -9,12 +9,23 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readEntries } from './files.ts';
 import { resolveRefs, runRecall, type RecallDeps, type RecallRequest } from './recall.ts';
+import { buildIndex, qmdCommand, qmdIndex } from './qmd.ts';
 import { findSession, searchSessions } from './sessions.ts';
 import { isSavedOutput } from './tool.ts';
 import type { Entry } from './transcript.ts';
 
-/** The request on stdin; `rg` names the ripgrep binary (tests point it at a missing one). */
-export type CliInput = { configDir: string; sessionId: string; request: RecallRequest; rg?: string };
+/**
+ * The request on stdin. `sessionIndex: "off"` keeps the cross-session search
+ * on the transcript scan even with qmd installed; `rg` names the ripgrep
+ * binary (tests point it at a missing one).
+ */
+export type CliInput = {
+  configDir: string;
+  sessionId: string;
+  request: RecallRequest;
+  sessionIndex?: 'auto' | 'off';
+  rg?: string;
+};
 
 /** A subagent of the session: `<session>/subagents/agent-<id>.jsonl` and its `.meta.json`. */
 type Agent = { id: string; name: string; startedBy?: string; file: string };
@@ -80,12 +91,16 @@ export function findTranscript(configDir: string, sessionId: string): string | u
   return undefined;
 }
 
-export async function answer({ configDir, sessionId, request, rg }: CliInput): Promise<string> {
+export async function answer({ configDir, sessionId, request, sessionIndex = 'auto', rg }: CliInput): Promise<string> {
   const file = /^[\w-]+$/.test(sessionId) ? findTranscript(configDir, sessionId) : undefined;
   if (!file) return 'Recall: no transcript found for this session.';
   const { sessions, project, session, ...rest } = request;
   if (sessions?.trim()) {
-    return searchSessions(configDir, file, sessions.trim(), project, rest.page ?? 1, { ...(rg && { rg }) });
+    const qmd = sessionIndex === 'auto' ? qmdCommand() : undefined;
+    return searchSessions(configDir, file, sessions.trim(), project, rest.page ?? 1, {
+      ...(rg && { rg }),
+      ...(qmd && { index: qmdIndex(configDir, { command: qmd }) }),
+    });
   }
   if (session?.trim()) {
     const other = findSession(configDir, session.trim());
@@ -130,6 +145,13 @@ async function answerFile(configDir: string, file: string, request: RecallReques
 }
 
 async function main(): Promise<void> {
+  // qmd.ts starts this to build the session index in a process of its own:
+  // --build-index <configDir> <index name> <qmd command...>
+  if (process.argv[2] === '--build-index') {
+    const [configDir, name, ...command] = process.argv.slice(3);
+    if (configDir && name && command.length > 0) await buildIndex(configDir, command, name);
+    return;
+  }
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
   // No request: the hook only makes sure tools/node.cmd has downloaded Node.

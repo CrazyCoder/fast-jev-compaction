@@ -15,9 +15,10 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
   large outputs included), `range` and `touched` (files changed, or every call
   on a file), in answers of at most 48k characters; `agent` runs a request on
   subagent transcripts, `sessions` searches past sessions of this project,
-  another or all (`project`), and `session` runs a request on one of them. Cut
-  notes name the recall call instead of "re-run the tool" (`recallNotes` in the
-  library).
+  another or all (`project`), and `session` runs a request on one of them; with
+  qmd installed that search uses a qmd index of the sessions
+  (`sessionIndex: auto`, default; `off` always scans). Cut notes name the recall
+  call instead of "re-run the tool" (`recallNotes` in the library).
 - `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
   SHA-256 on first use, which runs the recall tool; CI checks the line endings
   of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.

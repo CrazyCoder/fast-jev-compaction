@@ -96,6 +96,7 @@ describe('hook config', () => {
     expect(resolveHookConfig({})).toEqual({
       provider: 'jev',
       recall: true,
+      sessionIndex: 'auto',
       compactAtPercent: 60,
       minReductionRatio: 0.25,
       targetPercent: 45,
@@ -117,6 +118,7 @@ describe('hook config', () => {
     ).toEqual({
       provider: 'jev',
       recall: true,
+      sessionIndex: 'auto',
       apiKey: 'k',
       keepThreshold: 0.3,
       maxStateTokens: 1000,

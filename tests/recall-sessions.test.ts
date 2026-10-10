@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { answer } from '../src/recall/cli.ts';
+import { noteMeta, type SessionMeta } from '../src/recall/files.ts';
 import { candidateFiles } from '../src/recall/sessions.ts';
 
 const CURRENT = '11111111-1111-4111-8111-111111111111';
@@ -52,7 +53,19 @@ function config(): string {
   return dir;
 }
 
-const ask = (dir: string, request: Record<string, unknown>) => answer({ configDir: dir, sessionId: CURRENT, request });
+// The transcript scan; with qmd installed, "auto" would build the user's real session index.
+const ask = (dir: string, request: Record<string, unknown>) =>
+  answer({ configDir: dir, sessionId: CURRENT, request, sessionIndex: 'off' });
+
+describe('session meta', () => {
+  it('takes the first prompt the user typed, not a host block such as a command caveat', () => {
+    const meta: SessionMeta = {};
+    for (const content of ['<local-command-caveat>Caveat: run directly.</local-command-caveat>', '<command-name>/compact</command-name>', 'Fix the build.']) {
+      noteMeta(JSON.stringify({ type: 'user', message: { content } }), meta);
+    }
+    expect(meta.firstPrompt).toBe('Fix the build.');
+  });
+});
 
 describe('recall across sessions', () => {
   it('searches the other sessions of this project by default', async () => {
@@ -98,7 +111,8 @@ describe('recall across sessions', () => {
     expect(withRg.map((f) => f.includes(OTHER_PROJECT))).toEqual([true]);
     // Without ripgrep every transcript is a candidate; the line scan then decides.
     expect(sorted(candidateFiles(dirs, ['jscpd', 'baseline'], 'no-such-ripgrep'))).toHaveLength(3);
-    const ask3 = (rg: string) => answer({ configDir: dir, sessionId: CURRENT, request: { sessions: 'jscpd baseline', project: 'all' }, rg });
+    const ask3 = (rg: string) =>
+      answer({ configDir: dir, sessionId: CURRENT, request: { sessions: 'jscpd baseline', project: 'all' }, sessionIndex: 'off', rg });
     return Promise.all([ask3('rg'), ask3('no-such-ripgrep')]).then(([a, b]) => expect(b).toBe(a));
   });
 });

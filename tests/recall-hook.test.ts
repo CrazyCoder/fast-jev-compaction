@@ -104,8 +104,17 @@ describe('recall in the hook', () => {
       configDir: `${home.replace(/\\/g, '/')}/.claude`,
       sessionId: 'sess-1',
       request: { query: 'widget' },
+      sessionIndex: 'auto',
     });
     expect(runs[0]!.argv.at(-1)).toMatch(/src[\\/]recall[\\/]cli\.ts$/);
+  });
+
+  it('passes sessionIndex to the script, "auto" unless set to "off"', async () => {
+    for (const [option, sent] of [[undefined, 'auto'], ['off', 'off'], ['bogus', 'auto']] as const) {
+      const { $, runs } = host('/home/me', async () => ({ exitCode: 0, stdout: 'ok', stderr: '' }));
+      await hooks(option ? { sessionIndex: option } : {})[`tool.call:${RECALL_TOOL}`]!($, { tool: RECALL_TOOL, sessions: 'x' }, async () => ({}));
+      expect(JSON.parse(runs[0]!.init!.stdin!).sessionIndex, String(option)).toBe(sent);
+    }
   });
 
   it('reports a script that fails', async () => {
