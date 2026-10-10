@@ -99,6 +99,13 @@ describe('recall in the hook', () => {
     expect(toolRegister).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall' }));
   });
 
+  it('keeps the recall tool loaded instead of behind ToolSearch', async () => {
+    const describe = hooks()[`tool.describe:${RECALL_TOOL}`]!;
+    const out = await describe({}, { tool: RECALL_TOOL, description: 'd', isDeferred: true }, async (e) => e);
+    expect(out).toEqual(expect.objectContaining({ description: 'd', isDeferred: false }));
+    expect(hooks({ recall: false })[`tool.describe:${RECALL_TOOL}`]).toBeUndefined();
+  });
+
   it('registers /recall-index even when the tool cannot be registered', async () => {
     const { $, toolRegister, commandRegister } = host('/home/me');
     toolRegister.mockRejectedValueOnce(new Error('tools are not supported here'));

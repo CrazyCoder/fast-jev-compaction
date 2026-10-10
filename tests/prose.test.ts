@@ -107,6 +107,13 @@ describe('digest', () => {
     expect(refs).not.toContain('abc');
   });
 
+  it('names the recall tool in its header when recall is on, and still reads as a digest', () => {
+    const recalled = buildDigest(history(3), { recall: true });
+    expect(recalled.split('\n')[0]).toMatch(/; the recall tool reads them back from the transcript \(query, expand\)\]$/);
+    expect(parseCondensed(msg('user', recalled))?.kind).toBe('digest');
+    expect(buildDigest(history(3)).split('\n')[0]).not.toMatch(/recall/);
+  });
+
   it('truncates long prompts and replies', () => {
     const digest = buildDigest([msg('user', 'first'), msg('user', 'x'.repeat(5000)), msg('assistant', 'y'.repeat(5000))]);
     expect(digest.length).toBeLessThan(2500);

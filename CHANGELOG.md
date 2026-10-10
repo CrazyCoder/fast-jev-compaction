@@ -24,6 +24,12 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
   removes it.
 - A cross-session search that covers this session's project ends with how many
   matches this session holds, since its hits leave this session out.
+- Recall guidance: the recall tool is kept in the prompt's tool list instead of
+  behind ToolSearch; a digest header says recall reads its turns back; and a
+  compaction that cut anything opens the history with one
+  `[fast-jev-compaction note]` saying what it cut and to use recall before
+  re-running a tool, replaced by the next compaction (`recallNotes` in the
+  library; `withoutCompactionNote` strips it).
 - `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
   SHA-256 on first use, which runs the recall tool; CI checks the line endings
   of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.

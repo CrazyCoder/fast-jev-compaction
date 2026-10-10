@@ -682,6 +682,14 @@ export const register: Register = (on: On, options: PluginOptions) => {
         return { text: `recall-index failed: ${error instanceof Error ? error.message : String(error)}` };
       }
     });
+    // In the prompt's tool list, not behind ToolSearch: cut notes and the
+    // compaction note send the model to recall, which it can call only once
+    // loaded. The description never changes, so the prompt cache holds it.
+    // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
+    on('tool.describe', { tool: 'mcp__fast-jev-compaction__recall' }, async (_, e, next) => ({
+      ...(await next(e)),
+      isDeferred: false,
+    }));
     // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
     on('tool.call', { tool: 'mcp__fast-jev-compaction__recall' }, async ($, e) => {
       try {

@@ -410,6 +410,26 @@ describe('decisions', () => {
     );
   });
 
+  it('opens the compacted history with one note on what was cut and how recall reads it back', async () => {
+    const isNote = (m: Message) => m.text.startsWith('[fast-jev-compaction note]');
+    // Threshold mode cuts every call Jev scores low; rank mode would keep this small transcript whole.
+    const options = { ...fit, keepMode: 'threshold' as const, recallNotes: true };
+    const first = await compact(transcript(), fakeJev(() => 0.01), options);
+    expect(isNote(first.messages[0]!)).toBe(true);
+    expect(first.messages[0]!.text).toMatch(/3 older tool calls reduced to stubs/);
+    expect(first.messages[0]!.text).toMatch(/recall expand/);
+    expect(first.messages[1]!.role).toBe('assistant');
+    expect(first.messages[2]!.text).toBe(transcript()[0]!.text);
+    // A later compaction replaces the note instead of stacking another.
+    const again = await compact(first.messages, fakeJev(() => 0.01), options);
+    expect(again.messages.filter(isNote)).toHaveLength(1);
+    expect(isNote(again.messages[0]!)).toBe(true);
+    expect(again.messages[2]!.text).toBe(transcript()[0]!.text);
+    // Without recall there is nothing to point at; with nothing cut, nothing to say.
+    expect((await compact(transcript(), fakeJev(() => 0.01), { ...options, recallNotes: false })).messages.some(isNote)).toBe(false);
+    expect((await compact(transcript(), fakeJev(() => 0.99), options)).messages.some(isNote)).toBe(false);
+  });
+
   it('gives a cut recall answer the plain note: recall cannot expand its own calls', () => {
     const messages = transcript();
     messages[1]!.toolUses[0]!.tool = 'mcp__fast-jev-compaction__recall';

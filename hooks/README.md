@@ -264,6 +264,27 @@ index's exports above. The ranking and regex mode are adapted from
 [pi-vcc](https://github.com/sting8k/pi-vcc), the answer budget from
 [pi-blackhole](https://github.com/k0valik/pi-blackhole) (both MIT).
 
+### What the model is told
+
+With `recall` on, the model learns about compaction and recall where it needs
+to, and never on every prompt:
+
+- **The tool stays loaded.** The hook answers `tool.describe` for recall with
+  `isDeferred: false`, so its description sits in the prompt's tool list instead
+  of behind ToolSearch, where the model sees only the name. The description does
+  not change, so the prompt cache keeps it.
+- **Each cut note** names the call that returns the rest:
+  `full text: recall expand ["<tool_use_id>"]`.
+- **A digest header** ends with
+  `the recall tool reads them back from the transcript (query, expand)`.
+- **One compaction note** opens the compacted history: a user message starting
+  `[fast-jev-compaction note]` that says what this compaction cut (results cut
+  to heads, calls stubbed or dropped, messages digested) and to use recall
+  before running a tool again or saying something earlier is gone, with an
+  assistant acknowledgement. Each compaction replaces it, so there is only ever
+  one; a compaction that cut nothing writes none. It is part of the
+  conversation, so it survives a restart and `--resume`.
+
 ### `/recall-index`
 
 With `recall` on, the plugin adds the slash command `/recall-index`, which

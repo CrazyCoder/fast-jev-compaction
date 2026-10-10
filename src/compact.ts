@@ -50,6 +50,46 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
 const REQUEST_OVERHEAD_TOKENS = 20;
 
+/** The note a compaction with recall notes opens the history with; the next compaction replaces it. */
+const NOTE_MARKER = '[fast-jev-compaction note]';
+const NOTE_ACK = 'Understood: earlier content is cut, not lost; I will use recall to read it back.';
+
+type Turn = { role?: string; text: string; toolUses?: readonly unknown[] };
+
+/** `messages` without the compaction note and acknowledgement a compaction opened them with. */
+export function withoutCompactionNote<T extends Turn>(messages: readonly T[]): readonly T[] {
+  const [note, ack] = messages;
+  const opens =
+    note?.role === 'user' &&
+    !note.toolUses?.length &&
+    note.text.startsWith(NOTE_MARKER) &&
+    ack?.role === 'assistant' &&
+    ack.text === NOTE_ACK &&
+    !ack.toolUses?.length;
+  return opens ? messages.slice(2) : messages;
+}
+
+/**
+ * What a compaction cut, for the model, and how recall reads it back; undefined
+ * when it cut nothing.
+ */
+function compactionNote(
+  stats: Pick<CompactResult['stats'], 'resultsDropped' | 'callsStubbed' | 'callsDropped' | 'oldProseReplaced'>,
+): string | undefined {
+  const parts = [
+    stats.resultsDropped > 0 && `${stats.resultsDropped} tool results cut to their first characters`,
+    stats.callsStubbed > 0 && `${stats.callsStubbed} older tool calls reduced to stubs`,
+    stats.callsDropped > 0 && `${stats.callsDropped} tool calls dropped`,
+    stats.oldProseReplaced > 0 && `${stats.oldProseReplaced} older messages condensed into a digest`,
+  ].filter((part): part is string => typeof part === 'string');
+  if (parts.length === 0) return undefined;
+  return [
+    `${NOTE_MARKER} This conversation was compacted to fit the context: ${parts.join(', ')}.`,
+    'Nothing was deleted from the session transcript. A cut note names its tool_use_id: recall expand ["<id>"] returns that call and result in full, and recall query searches everything earlier.',
+    'Use recall before running a tool again to see an old result, and before saying something from earlier is gone.',
+  ].join(' ');
+}
+
 function finite(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
@@ -562,7 +602,9 @@ export async function compact(
 ): Promise<CompactResult> {
   const started = Date.now();
   const resolved = resolveOptions(options);
-  const prose = await condenseOldProse(original, resolved, deps.summarize);
+  // An earlier compaction's note goes; this one writes its own.
+  const history = withoutCompactionNote(original);
+  const prose = await condenseOldProse(history, resolved, deps.summarize);
   const host = resolved.trimHostText
     ? trimHostText(prose.messages, resolved)
     : { messages: prose.messages, trimmed: 0, charsCut: 0 };
@@ -623,6 +665,19 @@ export async function compact(
     resolved.truncateHeadChars,
     resolved.recallNotes,
   );
+  const cut = {
+    resultsDropped: count(decisions, 'result_dropped'),
+    callsDropped: count(decisions, 'call_dropped'),
+    callsStubbed: count(decisions, 'call_stubbed'),
+    oldProseReplaced: prose.replaced,
+  };
+  const note = resolved.recallNotes ? compactionNote(cut) : undefined;
+  if (note) {
+    kept.unshift(
+      { role: 'user', text: note, toolUses: [] },
+      { role: 'assistant', text: NOTE_ACK, toolUses: [] },
+    );
+  }
   return {
     messages: kept,
     decisions,
@@ -633,9 +688,9 @@ export async function compact(
       charsAfter: kept.reduce((sum, message) => sum + messageChars(message), 0),
       calls: calls.length,
       kept: count(decisions, 'kept'),
-      resultsDropped: count(decisions, 'result_dropped'),
-      callsDropped: count(decisions, 'call_dropped'),
-      callsStubbed: count(decisions, 'call_stubbed'),
+      resultsDropped: cut.resultsDropped,
+      callsDropped: cut.callsDropped,
+      callsStubbed: cut.callsStubbed,
       pinned: count(decisions, 'pinned'),
       hostTextTrimmed: host.trimmed,
       hostCharsTrimmed: host.charsCut,

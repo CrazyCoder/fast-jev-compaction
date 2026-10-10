@@ -20,7 +20,9 @@ project's many forks; the full lineage is under
 | Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
 | `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
 | OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction) (235a6c6) |
-| Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. `sessions` searches past sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. With [qmd](https://github.com/tobi/qmd) installed, that search goes through an index of the sessions, which `/recall-index` builds for all projects or the ones you name (see [Searching past sessions](#searching-past-sessions)). It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. Cut notes name the call that gets the rest instead of "re-run the tool". `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader and notes: this fork |
+| Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader: this fork |
+| Past-session search | `sessions` searches the other sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. The current session's matches are counted on a last line. With [qmd](https://github.com/tobi/qmd) installed, the search goes through an index of the sessions, which `/recall-index` builds for all projects or the ones you name by name, path or folder. Details: [Searching past sessions](#searching-past-sessions) | This fork |
+| Recall guidance | The model is told what compaction cut and how to get it back, at the points where it matters and never on every prompt: the recall tool stays loaded instead of behind ToolSearch, each cut note names the `recall expand` call that returns the rest, a digest says recall reads its turns back, and one note at the top of the compacted history says what this compaction cut and to use recall before re-running a tool or saying something is gone. Each compaction replaces that note. Details: [What the model is told](hooks/README.md#what-the-model-is-told) | This fork |
 | Adaptive prose digest | Each compaction keeps your old prose verbatim while that frees enough. When it would be refused, as happens after two or three compactions in a long session, the prose older than `recentTurns` becomes a digest (cut results keep 100-character heads), and later compactions start with the digest, so multi-day sessions keep compacting instead of getting stuck. Pros, cons and options: [Adaptive prose digest](#adaptive-prose-digest) | This fork; the digest is QuanticPotatoes' `oldProse: digest` |
 | Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
 
@@ -161,9 +163,9 @@ original message, call and result back from the transcript.
   intermediate reply is gone. Repeat what still matters, or put it in
   `CLAUDE.md`.
 - Old tool calls leave no stubs, only counts. The model has to call `recall` to
-  see them again, and models do not always think to. On a replay of real
-  sessions the share of cut content that was needed later rose from 1.0% to 1.7%
-  with the digest.
+  see them again; the digest header and the compaction note tell it to, but it
+  does not always follow. On a replay of real sessions the share of cut content
+  that was needed later rose from 1.0% to 1.7% with the digest.
 - The compaction that switches runs Jev twice, once per pass, and both passes
   share one `compactionTimeoutMs`; with a slow Jev the second pass can time out
   and the compaction follows `builtinFallback`.
@@ -329,10 +331,11 @@ this fork adds is listed under [Added in this fork](#added-in-this-fork).
 | Failed Jev request | Whole compaction falls back | Same | Same | Its calls kept, rest applied |
 | Decision provider | Jev | Jev (any System One endpoint) | Same | Same + OpenAI Decisions |
 | What was cut | Gone from the conversation | Same | Same | `recall` tool reads it back from the transcript |
+| Model told what was cut | No | No | No | Cut notes, digest header and one note per compaction point at recall |
+| Past sessions | No | No | No | Searched by keyword, optionally through a qmd index |
 | CI and releases | No | No | Yes | Yes |
 
-Roadmap: recall of the files a session touched, of subagent transcripts, and
-across sessions; fact salvage on dropped calls (upstream issues
+Roadmap: fact salvage on dropped calls (upstream issues
 [#118](https://github.com/tamaratran/fast-jev-compaction/issues/118),
 [#105](https://github.com/tamaratran/fast-jev-compaction/issues/105)).
 

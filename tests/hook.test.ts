@@ -16,7 +16,14 @@ import {
   withCompactionDeadline,
 } from '../hooks/fast-jev.ts';
 import { parseEnv } from '../src/dotenv.js';
-import { applyDecisions, collectToolCalls, decideCall, RETRY_DELAY_MS, type Message } from '../src/index.js';
+import {
+  applyDecisions,
+  collectToolCalls,
+  decideCall,
+  RETRY_DELAY_MS,
+  withoutCompactionNote,
+  type Message,
+} from '../src/index.js';
 
 type SessionMessage = Message & { handle?: string };
 
@@ -343,7 +350,8 @@ describe('compactSession', () => {
     expect(bodies).toHaveLength(1);
     expect(JSON.parse(bodies[0]!).model).toBe('jev-x');
     expect(output.decisions.map((d) => d.action)).toEqual(['drop_call', 'keep']);
-    expect(messages.map((m) => m.handle)).toEqual(['h-0', 'h-tool-2', 'r-tool-2', 'h-5', 'h-6']);
+    expect(messages[0]!.text).toMatch(/^\[fast-jev-compaction note\] .*1 tool calls dropped/);
+    expect(withoutCompactionNote(messages).map((m) => m.handle)).toEqual(['h-0', 'h-tool-2', 'r-tool-2', 'h-5', 'h-6']);
     expect(summarize(output)).toMatch(/^\d+% reduction; 1 kept, 1 call_dropped; state ~\d+ tokens \(full\) in 1 request\(s\)$/);
     expect(decisionLog(output)).toBe('t1:Read:drop_call/call=0.10/result=0.10 t2:Bash:keep/call=0.90/result=0.90');
     expect(decisionLogLines(output)).toEqual([`decisions: ${decisionLog(output)}`]);
@@ -761,9 +769,10 @@ describe('old prose through the hook', () => {
 
   it('digest replaces the old prefix and leaves the recent turns', async () => {
     const { out, messages } = await run({ oldProse: 'digest', recentTurns: 3 });
-    expect(out.messages[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns/);
+    const history = withoutCompactionNote(out.messages);
+    expect(history[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns.*; the recall tool reads them back/);
     expect(out.messages.at(-1)!.text).toBe(messages.at(-1)!.text);
-    expect(out.messages).toHaveLength(2 + 3 * 2);
+    expect(history).toHaveLength(2 + 3 * 2);
   });
 
   it('summarize asks the session model with proseModel and installs its reply', async () => {
@@ -774,12 +783,12 @@ describe('old prose through the hook', () => {
     });
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ model: 'sonnet', maxTokens: 3000 });
-    expect(out.messages[0]!.text).toBe('[fast-jev-compaction summary of 9 earlier turns]\nMODEL SUMMARY');
+    expect(withoutCompactionNote(out.messages)[0]!.text).toBe('[fast-jev-compaction summary of 9 earlier turns]\nMODEL SUMMARY');
   });
 
   it('summarize falls back to the digest when the model does not answer', async () => {
     const { out } = await run({ oldProse: 'summarize', recentTurns: 3 }, async () => null);
-    expect(out.messages[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns/);
+    expect(withoutCompactionNote(out.messages)[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns/);
   });
 
   it('keep makes no model call', async () => {
@@ -822,7 +831,7 @@ describe('old prose through the hook', () => {
 
   it('digests old prose by default when verbatim prose would be refused', async () => {
     const { out, notices } = await run({ recentTurns: 3 });
-    expect(out.messages[0]!.text).toMatch(digestMarker);
+    expect(withoutCompactionNote(out.messages)[0]!.text).toMatch(digestMarker);
     expect(notices.at(-1)).toMatch(/old prose digest: .*; verbatim prose was refused \(below 25% minimum/);
   });
 
@@ -832,7 +841,7 @@ describe('old prose through the hook', () => {
       message('assistant', 'Understood. Continuing from the earlier-turns digest above.'),
     ];
     const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
-    const turnsDigested = Number(digestMarker.exec(out.messages![0]!.text)?.[1]);
+    const turnsDigested = Number(digestMarker.exec(withoutCompactionNote(out.messages!)[0]!.text)?.[1]);
     expect(turnsDigested).toBeGreaterThan(5);
   });
 
@@ -880,7 +889,7 @@ describe('old prose through the hook', () => {
     const summary = '[fast-jev-compaction summary of 5 earlier turns]\nWe set up the build.';
     const earlier = [message('user', summary), message('assistant', 'Understood. Continuing from the earlier-turns summary above.')];
     const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
-    expect(out.messages![0]!.text).toBe(summary);
+    expect(withoutCompactionNote(out.messages!)[0]!.text).toBe(summary);
   });
 
   it('does not retry an explicit oldProse: keep', async () => {
