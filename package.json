@@ -28,10 +28,13 @@
     "validate:plugin": "claude plugin validate .claude-plugin/plugin.json",
     "check:version": "node scripts/check-version.mjs",
     "replay": "tsx tools/replay/run.ts",
-    "typecheck:tools": "tsc -p tsconfig.tools.json"
+    "typecheck:tools": "tsc -p tsconfig.tools.json",
+    "jscpd:list": "jscpd -c .jscpd.json --reporters ai",
+    "jscpd:baseline": "jscpd -c .jscpd.json --update-baseline"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "jscpd": "5.4.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^5.0.1"

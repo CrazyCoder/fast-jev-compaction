@@ -1,0 +1,14 @@
+{
+  "path": ["."],
+  "format": ["javascript", "typescript"],
+  "minTokens": 50,
+  "minLines": 5,
+  "ignore": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "types/claude-code.d.ts"
+  ],
+  "baseline": ".jscpd-baseline.json",
+  "reporters": ["silent"]
+}

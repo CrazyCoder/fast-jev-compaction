@@ -219,7 +219,8 @@ The package is usable without Claude Code (`compactMessages`, your own
 ```sh
 npm install
 npm run typecheck        # library + hook
-npm test                 # fake Jev, no network
+npm test                 # fake Jev, no network; includes the duplicate code gate
+npm run jscpd:list       # every clone (see docs/duplicate-code.md)
 npm run test:hooks:host  # native hook dispatcher tests; requires Claude Code
 npm run build
 npm run validate:plugin  # claude plugin validate
