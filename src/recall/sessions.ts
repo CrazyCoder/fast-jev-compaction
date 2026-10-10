@@ -159,7 +159,12 @@ export async function searchSessions(
     if (picked.length === 0) return `No project matches "${oneLine(project!, 60)}".`;
   }
   const exclude = basename(currentFile, '.jsonl');
-  const indexed = await index?.(query, new Set(picked.map((p) => p.slug)), exclude);
+  let indexed: IndexedHit[] | undefined;
+  try {
+    indexed = await index?.(query, new Set(picked.map((p) => p.slug)), exclude);
+  } catch {
+    // An index that fails leaves the search to the scan below.
+  }
   if (indexed) return indexedAnswer(indexed, query, page, scope);
 
   for (const p of picked) {

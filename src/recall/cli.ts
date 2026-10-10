@@ -4,8 +4,9 @@
  * stdin, `{ configDir, sessionId, request }`, and the answer goes to stdout.
  * Node reads the transcript at any size, which a hook's `$.fs.read` cannot.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readEntries } from './files.ts';
 import { resolveRefs, runRecall, type RecallDeps, type RecallRequest } from './recall.ts';
 import { buildIndex, qmdCommand, qmdIndex } from './qmd.ts';
@@ -61,11 +62,22 @@ function sessionAgents(sessionDir: string): Agent[] {
  * the session's own count: an entry keeps its number whichever agents a
  * request picks.
  */
-async function agentEntries(agents: readonly Agent[], after: number): Promise<{ agent: Agent; entry: Entry }[]> {
+/** Numbers of one subagent's entries start at a multiple of this, past any session's own. */
+const AGENT_NUMBER_BASE = 100_000;
+
+/**
+ * Every subagent entry, numbered so the number holds while the session grows:
+ * the k-th agent, in the order the session started them (agents with no known
+ * start last, by id), numbers its entries from k × 100,000 + 1.
+ */
+async function agentEntries(agents: readonly Agent[], main: readonly Entry[]): Promise<{ agent: Agent; entry: Entry }[]> {
+  const startedAt = new Map(main.flatMap((e) => (e.kind === 'call' ? [[e.id, e.n] as const] : [])));
+  const order = (a: Agent) => (a.startedBy && startedAt.get(a.startedBy)) || Number.MAX_SAFE_INTEGER;
+  const ranked = [...agents].sort((a, b) => order(a) - order(b) || a.id.localeCompare(b.id));
   const out: { agent: Agent; entry: Entry }[] = [];
-  for (const agent of agents) {
+  for (const [k, agent] of ranked.entries()) {
     for (const entry of await readEntries(agent.file, true)) {
-      out.push({ agent, entry: { ...entry, n: after + out.length + 1, where: agent.name } });
+      out.push({ agent, entry: { ...entry, n: (k + 1) * AGENT_NUMBER_BASE + entry.n, where: agent.name } });
     }
   }
   return out;
@@ -141,12 +153,12 @@ async function answerFile(configDir: string, file: string, request: RecallReques
     const part = wanted.toLowerCase();
     const picked = wanted === 'all' ? agents : agents.filter((a) => `${a.id} ${a.name}`.toLowerCase().includes(part));
     if (picked.length === 0) return `No subagent matches "${wanted.slice(0, 100)}". agent: "list" shows them.`;
-    const theirs = (await agentEntries(agents, main.length)).filter(({ agent: a }) => picked.includes(a)).map(({ entry }) => entry);
+    const theirs = (await agentEntries(agents, main)).filter(({ agent: a }) => picked.includes(a)).map(({ entry }) => entry);
     return runRecall([...(wanted === 'all' ? main : []), ...theirs], rest, deps);
   }
   // An entry the session's transcript does not hold may be a subagent's.
   if (rest.expand?.length && resolveRefs(main, rest.expand).missing.length > 0 && agents.length > 0) {
-    return runRecall([...main, ...(await agentEntries(agents, main.length)).map(({ entry }) => entry)], rest, deps);
+    return runRecall([...main, ...(await agentEntries(agents, main)).map(({ entry }) => entry)], rest, deps);
   }
   return runRecall(main, rest, deps);
 }
@@ -170,4 +182,8 @@ async function main(): Promise<void> {
   }
 }
 
-if (import.meta.main) void main();
+// import.meta.main is Node 24.2+; older Nodes running the built library compare the real paths.
+const isMain =
+  import.meta.main ??
+  (process.argv[1] !== undefined && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]));
+if (isMain) void main();

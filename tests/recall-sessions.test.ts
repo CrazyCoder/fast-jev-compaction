@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { answer } from '../src/recall/cli.ts';
 import { noteMeta, type SessionMeta } from '../src/recall/files.ts';
-import { candidateFiles } from '../src/recall/sessions.ts';
+import { candidateFiles, searchSessions } from '../src/recall/sessions.ts';
 
 const CURRENT = '11111111-1111-4111-8111-111111111111';
 const SAME_PROJECT = '22222222-2222-4222-8222-222222222222';
@@ -109,6 +109,16 @@ describe('recall across sessions', () => {
     const dir = config();
     const out = await answer({ configDir: dir, sessionId: CURRENT, request: { sessions: 'jscpd', project: 'all' }, sessionIndex: 'off', scanBudgetMs: 0 });
     expect(out).toMatch(/Read 1 of 2 matching sessions before the time ran out/);
+  });
+
+  it('answers from the scan when the session index throws', async () => {
+    const dir = config();
+    const current = join(dir, 'projects', 'C--work-app', `${CURRENT}.jsonl`);
+    const broken = async () => {
+      throw new Error('EBUSY: resource busy or locked');
+    };
+    const out = await searchSessions(dir, current, 'jscpd', 'all', 1, { index: broken });
+    expect(out).toMatch(/match\(es\) in \d+ session\(s\) of all projects/);
   });
 
   it('labels a hit with its own project when one project folder name starts another', async () => {

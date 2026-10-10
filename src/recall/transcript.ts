@@ -88,13 +88,10 @@ export function transcriptReader({ sidechain = false, orphanResults = false } = 
   const text = (kind: 'prompt' | 'reply', raw: string): void => {
     const body = withoutReminders(raw).trim();
     if (!body || copy) return;
-    if (timed) {
-      entries.push({ n: entries.length + 1, kind, text: body });
-      return;
-    }
+    // Timed rows are recorded too, for copies after a boundary with no time.
     const key = `${kind}\u0000${body}\u0000${previous}`;
     const seen = texts.get(key);
-    if (seen !== undefined) {
+    if (!timed && seen !== undefined) {
       previous = seen;
       return;
     }
@@ -135,12 +132,13 @@ export function transcriptReader({ sidechain = false, orphanResults = false } = 
     const at = row.timestamp ? Date.parse(row.timestamp) : Number.NaN;
     if (row.type === 'system' && row.subtype === 'compact_boundary') {
       previous = '';
-      if (!Number.isNaN(at)) boundaryAt = at;
+      // A boundary with no time leaves the copies after it to the order check.
+      boundaryAt = at;
       return;
     }
     if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isCompactSummary) return;
     if (row.isSidechain && !sidechain) return;
-    timed = !Number.isNaN(at);
+    timed = !Number.isNaN(at) && !Number.isNaN(boundaryAt);
     copy = at <= boundaryAt;
     const content = row.message?.content;
     const blocks: Block[] = Array.isArray(content) ? (content as Block[]) : [];

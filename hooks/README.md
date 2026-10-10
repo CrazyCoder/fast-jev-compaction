@@ -234,18 +234,22 @@ copies after each boundary, and keeps each call's first, uncut result:
   search builds it in the background and is answered by the scan; later searches
   re-export the sessions that changed (not the current one), update the index
   and search it. When the index finds nothing in the asked projects, or a search
-  fails, the scan answers; a failed search rebuilds the index next time. Exports
-  are readable by their owner only, and an export goes when Claude Code removes
-  its transcript after `cleanupPeriodDays`. On Windows the npm `qmd.cmd` shim is
-  run as its script under the shim's own Node. `sessionIndex: "off"` always
-  scans.
+  fails or throws, the scan answers; a failed search rebuilds the index next
+  time only when its index file is gone. The exports, their folders and the
+  index file are made readable by their owner only on each build, and an export
+  goes when Claude Code removes its transcript after `cleanupPeriodDays`. On
+  Windows the npm `qmd.cmd` shim is run as its script under the shim's own Node.
+  `sessionIndex: "off"` always scans.
 - `session: "<id or its first 8+ characters>"` runs `query`, `expand`, `range`,
   `touched` or `agent` on that session instead of this one.
 - `agent`: subagents keep their own transcripts under `<session>/subagents/`.
   `"list"` names them with the Agent call that started each; a part of an
   agent's id or name runs the request on that agent's transcript, `"all"` on the
-  session's and every agent's. `expand` finds a subagent call by its tool_use_id
-  without it, and an Agent call shows the agent it started.
+  session's and every agent's. Subagent entries are numbered per agent, in the
+  order the session started them: the first agent's from #100001, the second's
+  from #200001, so their numbers hold while the session grows. `expand` finds a
+  subagent entry by that number or a call by its tool_use_id without `agent`,
+  and an Agent call shows the agent it started.
 
 An answer holds at most 48,000 characters, shared between expanded entries.
 Recall's own calls are not listed. Cut notes end with

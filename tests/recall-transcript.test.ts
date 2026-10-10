@@ -80,6 +80,23 @@ describe('readTranscript', () => {
     ]);
   });
 
+  it('skips copies by their order when the compaction boundary has no timestamp', () => {
+    const at = (s: number) => `2026-10-10T10:00:${String(s).padStart(2, '0')}.000Z`;
+    const entries = readTranscript(
+      [
+        { type: 'user', timestamp: at(1), message: { content: 'P1' } },
+        { type: 'assistant', timestamp: at(2), message: { content: [{ type: 'text', text: 'R1' }] } },
+        { type: 'system', subtype: 'compact_boundary' },
+        { type: 'user', timestamp: at(3), message: { content: 'P1' } },
+        { type: 'assistant', timestamp: at(3), message: { content: [{ type: 'text', text: 'R1' }] } },
+        { type: 'user', timestamp: at(4), message: { content: 'P2' } },
+      ]
+        .map((r) => JSON.stringify(r))
+        .join('\n'),
+    );
+    expect(entries.map((e) => (e.kind === 'call' ? e.tool : e.text))).toEqual(['P1', 'R1', 'P2']);
+  });
+
   it('reads a row once when the transcript holds it again under the same uuid', () => {
     const rows = [
       row('user', 'Fix the bug.', { uuid: 'u1', timestamp: '2026-10-10T10:00:00Z' }),

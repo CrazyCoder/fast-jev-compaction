@@ -10,7 +10,8 @@
  * changed, update the index, and search it.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projects, readSession, transcripts } from './files.ts';
@@ -101,8 +102,12 @@ export async function exportSessions(configDir: string, exclude?: string): Promi
     for (const name of readdirSync(join(root, slug.name)).filter((n) => n.endsWith('.md'))) {
       const md = join(root, slug.name, name);
       if (live.has(md)) continue;
-      rmSync(md, { force: true });
-      changedCount += 1;
+      try {
+        rmSync(md, { force: true });
+        changedCount += 1;
+      } catch {
+        // Held open (qmd, on Windows): removed on a later export.
+      }
     }
   }
   return changedCount;
@@ -159,6 +164,30 @@ function runQmd(command: readonly string[], name: string, args: readonly string[
 const marker = (configDir: string, name: string) => join(sessionsDir(configDir), `.indexed-${name}`);
 const building = (configDir: string, name: string) => join(sessionsDir(configDir), `.building-${name}`);
 
+/** The index file qmd keeps for `name`, under XDG_CACHE_HOME or ~/.cache. */
+export function indexFile(name: string, env: Env = process.env): string {
+  const cache = env['XDG_CACHE_HOME'] || join(env['HOME'] || env['USERPROFILE'] || homedir(), '.cache');
+  return join(cache, 'qmd', `${name}.sqlite`);
+}
+
+/** Makes the exports, their folders and the index file readable by their owner only, whenever they were written. */
+function restrict(configDir: string, name: string, env: Env): void {
+  const root = sessionsDir(configDir);
+  const paths = [root];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(root, entry.name);
+    paths.push(dir, ...readdirSync(dir).map((file) => join(dir, file)));
+  }
+  for (const path of [...paths, indexFile(name, env)]) {
+    try {
+      chmodSync(path, statSync(path).isDirectory() ? 0o700 : 0o600);
+    } catch {
+      // Gone, or not ours to change.
+    }
+  }
+}
+
 /** Exports every session and builds the index; marks it ready when qmd succeeds. */
 export async function buildIndex(configDir: string, command: readonly string[], name: string, env: Env = process.env): Promise<boolean> {
   await exportSessions(configDir);
@@ -166,19 +195,25 @@ export async function buildIndex(configDir: string, command: readonly string[], 
   runQmd(command, name, ['collection', 'remove', COLLECTION], env);
   runQmd(command, name, ['collection', 'add', sessionsDir(configDir), '--name', COLLECTION], env);
   const updated = runQmd(command, name, ['update'], env);
+  restrict(configDir, name, env);
   if (updated.status !== 0) return false;
   writeFileSync(marker(configDir, name), new Date().toISOString());
   rmSync(building(configDir, name), { force: true });
   return true;
 }
 
-/** Takes the build lock, unless a build that is not stale holds it. */
+/** Takes the build lock, unless a build that is not stale holds it or has just let it go. */
 function takeBuildLock(lock: string): boolean {
   try {
     writeFileSync(lock, String(Date.now()), { flag: 'wx' });
     return true;
   } catch {
-    const since = Number(readFileSync(lock, 'utf8'));
+    let since = 0;
+    try {
+      since = Number(readFileSync(lock, 'utf8'));
+    } catch {
+      return false;
+    }
     if (since && Date.now() - since < BUILD_STALE_MS) return false;
     writeFileSync(lock, String(Date.now()));
     return true;
@@ -204,8 +239,8 @@ export type QmdIndexOptions = { command: readonly string[]; name?: string; backg
 /**
  * The qmd session index as searchSessions takes it. It answers only with hits
  * in the asked projects; otherwise (no such hit, output that is not JSON, a
- * failed search) the scan answers, and a failed search marks the index for a
- * rebuild.
+ * failed search) the scan answers. A failed search marks the index for a
+ * rebuild only when its file is gone: a timeout or a busy database passes.
  */
 export function qmdIndex(configDir: string, { command, name = QMD_INDEX, background = true, env = process.env }: QmdIndexOptions): SessionIndex {
   return async (query, slugs, exclude) => {
@@ -220,7 +255,7 @@ export function qmdIndex(configDir: string, { command, name = QMD_INDEX, backgro
     }
     const found = runQmd(command, name, ['search', '-c', COLLECTION, '--format', 'json', '-n', String(SEARCH_HITS), '--', query], env);
     if (found.status !== 0) {
-      rmSync(marker(configDir, name), { force: true });
+      if (!existsSync(indexFile(name, env))) rmSync(marker(configDir, name), { force: true });
       return undefined;
     }
     const hits = indexedHits(configDir, found.stdout, slugs, exclude);

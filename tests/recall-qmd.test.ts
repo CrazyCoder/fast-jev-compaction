@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { exportSessions, indexedHits, qmdCommand, sessionMarkdown, sessionsDir } from '../src/recall/qmd.ts';
+import { buildIndex, exportSessions, indexedHits, qmdCommand, sessionMarkdown, sessionsDir } from '../src/recall/qmd.ts';
 import { searchSessions } from '../src/recall/sessions.ts';
 import { qmdIndex } from '../src/recall/qmd.ts';
 
@@ -122,13 +122,20 @@ describe('the session index', () => {
     expect((await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: hitIn('c--work-billing-api', ID) })).hits).toHaveLength(1);
   });
 
-  it('rebuilds the index after a search fails, as when its file was deleted', async () => {
+  it('rebuilds the index after a search fails because its file is gone, not on a passing failure', async () => {
     const dir = config();
-    await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: '[]' });
+    const cache = mkdtempSync(join(tmpdir(), 'qmd-cache-'));
+    const env = { XDG_CACHE_HOME: cache };
+    await ask(dir, 'jscpd', 'c--work-billing-api', { ...env, FAKE_SEARCH: '[]' });
     expect(readdirSync(sessionsDir(dir))).toContain('.indexed-fake');
-    await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_STATUS: '1' });
+    mkdirSync(join(cache, 'qmd'));
+    writeFileSync(join(cache, 'qmd', 'fake.sqlite'), '');
+    await ask(dir, 'jscpd', 'c--work-billing-api', { ...env, FAKE_STATUS: '1' });
+    expect(readdirSync(sessionsDir(dir))).toContain('.indexed-fake');
+    rmSync(join(cache, 'qmd', 'fake.sqlite'));
+    await ask(dir, 'jscpd', 'c--work-billing-api', { ...env, FAKE_STATUS: '1' });
     expect(readdirSync(sessionsDir(dir))).not.toContain('.indexed-fake');
-    const { calls } = await ask(dir, 'jscpd', 'c--work-billing-api', { FAKE_SEARCH: '[]' });
+    const { calls } = await ask(dir, 'jscpd', 'c--work-billing-api', { ...env, FAKE_SEARCH: '[]' });
     expect(calls.some((c) => c.includes('update'))).toBe(true);
   });
 });
@@ -153,6 +160,23 @@ describe('session export upkeep', () => {
     await exportSessions(dir);
     expect(statSync(join(sessionsDir(dir), 'c--work-billing-api', `${ID}.md`)).mode & 0o777).toBe(0o600);
     expect(statSync(sessionsDir(dir)).mode & 0o777).toBe(0o700);
+  });
+
+  it.skipIf(process.platform === 'win32')('makes exports and the index written before readable by their owner only', async () => {
+    const dir = config();
+    await exportSessions(dir);
+    const md = join(sessionsDir(dir), 'c--work-billing-api', `${ID}.md`);
+    chmodSync(md, 0o644);
+    chmodSync(join(sessionsDir(dir), 'c--work-billing-api'), 0o755);
+    const cache = mkdtempSync(join(tmpdir(), 'qmd-cache-'));
+    mkdirSync(join(cache, 'qmd'));
+    const sqlite = join(cache, 'qmd', 'fake.sqlite');
+    writeFileSync(sqlite, '', { mode: 0o644 });
+    const fake = fakeQmd();
+    await buildIndex(dir, fake.command, 'fake', { ...process.env, FAKE_LOG: fake.log, XDG_CACHE_HOME: cache });
+    expect(statSync(md).mode & 0o777).toBe(0o600);
+    expect(statSync(join(sessionsDir(dir), 'c--work-billing-api')).mode & 0o777).toBe(0o700);
+    expect(statSync(sqlite).mode & 0o777).toBe(0o600);
   });
 });
 

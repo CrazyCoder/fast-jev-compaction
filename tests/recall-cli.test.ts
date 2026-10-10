@@ -122,13 +122,20 @@ describe('recall in subagent transcripts', () => {
     expect(await ask(dir, { query: 'x', agent: 'nope' })).toBe('No subagent matches "nope". agent: "list" shows them.');
   });
 
-  it('numbers subagent entries after the session\'s, the same whichever agent is asked for', async () => {
+  it('numbers subagent entries from #100001 per agent, the same whichever agent is asked for', async () => {
     const dir = withAgent();
     const one = await ask(dir, { query: 'cache.yml', agent: 'cache config' });
     const n = /^#(\d+) \[Explore: Find the cache config\] call Grep \(s1\)/m.exec(one)?.[1];
-    expect(n).toBe('6');
+    expect(n).toBe('100002');
     expect(await ask(dir, { expand: [`#${n}`] })).toContain('config/cache.yml:3: timeout: 5');
-    expect(await ask(dir, { range: [5, 7], agent: 'all' })).toContain('#6 [Explore: Find the cache config] call Grep (s1)');
+    expect(await ask(dir, { range: [100001, 100003], agent: 'all' })).toContain('#100002 [Explore: Find the cache config] call Grep (s1)');
+  });
+
+  it('keeps a subagent entry\'s number while the session grows', async () => {
+    const dir = withAgent();
+    const transcript = join(dir, 'projects', 'C--work-app', `${SESSION}.jsonl`);
+    writeFileSync(transcript, `\n${JSON.stringify({ type: 'user', message: { content: 'one more prompt' } })}`, { flag: 'a' });
+    expect(await ask(dir, { query: 'cache.yml', agent: 'cache config' })).toMatch(/^#100002 \[Explore/m);
   });
 
   it('expands a subagent call by its id from the session view, and shows which agent an Agent call started', async () => {
