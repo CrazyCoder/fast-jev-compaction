@@ -156,6 +156,9 @@ stage was needed, and the number of requests.
 7. The message list is rebuilt: a message that loses all its content is removed,
    untouched messages are returned as the same objects, and no result is ever
    left without its call.
+8. With `recallNotes`, a compaction that cut anything opens the list with its
+   compaction note and an acknowledgement; the note an earlier compaction left
+   is taken out before step 1.
 
 A missing key, or Jev failing every request (an error, a malformed answer),
 throws; the caller (or the Claude Code hook) decides what to fall back to. When

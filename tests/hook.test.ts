@@ -769,6 +769,7 @@ describe('old prose through the hook', () => {
 
   it('digest replaces the old prefix and leaves the recent turns', async () => {
     const { out, messages } = await run({ oldProse: 'digest', recentTurns: 3 });
+    expect(out.messages[0]!.text).toMatch(/^\[fast-jev-compaction note\] .*\d+ older messages condensed into a digest/);
     const history = withoutCompactionNote(out.messages);
     expect(history[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns.*; the recall tool reads them back/);
     expect(out.messages.at(-1)!.text).toBe(messages.at(-1)!.text);
