@@ -4,6 +4,25 @@
   "description": "Verbatim context compaction for LLM agents, guided by a fast decision model (TypeSafe Jev or OpenAI Decisions).",
   "type": "module",
   "license": "MIT",
+  "author": "CrazyCoder (https://github.com/CrazyCoder)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CrazyCoder/jetcompact.git"
+  },
+  "homepage": "https://github.com/CrazyCoder/jetcompact#readme",
+  "bugs": "https://github.com/CrazyCoder/jetcompact/issues",
+  "keywords": [
+    "llm",
+    "agent",
+    "context",
+    "compaction",
+    "claude-code",
+    "jev",
+    "typesafe"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },
@@ -20,6 +39,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit && npm run typecheck:hooks && npm run typecheck:tools",
     "test": "vitest run",
     "test:hooks:host": "node scripts/test-host-hooks.mjs",
