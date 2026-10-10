@@ -1,11 +1,10 @@
 /**
- * The recall tool's engine: search, expand and list the entries of a session
- * transcript (readTranscript), within a fixed answer size.
+ * The recall tool's engine: search, expand and list a session's entries
+ * (entriesFromGroups), within a fixed answer size.
  *
  * Adapted from pi-vcc (MIT, Copyright (c) 2026 sting8k): the BM25-lite ranking,
- * the stopwords, the regex fallback and its nested-quantifier guard. The
- * answer budget and its per-entry share follow pi-blackhole (MIT, Copyright
- * (c) 2026 k0valik).
+ * the stopwords and the regex mode. The answer budget and its per-entry share
+ * follow pi-blackhole (MIT, Copyright (c) 2026 k0valik).
  */
 import type { Entry } from './transcript.js';
 

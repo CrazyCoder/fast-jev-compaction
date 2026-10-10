@@ -73,7 +73,7 @@
     "recall": {
       "type": "boolean",
       "title": "Recall tool",
-      "description": "Save what each compaction receives under <config dir>/fast-jev-compaction/recall/ and offer the model a recall tool to search and read it back, cut tool results included. Archives untouched for 30 days are emptied.",
+      "description": "Save what each compaction receives under <config dir>/fast-jev-compaction/recall/ and offer the model a recall tool to search and read it back, cut tool results included. Archives untouched for 30 days are emptied, with this on or off.",
       "default": true
     },
     "dropCalls": {

@@ -183,19 +183,23 @@ without a Claude CLI.
 With `recall` on (the default), the `session.compact` hook first saves the rows
 it receives, full tool results included, to
 `<config dir>/fast-jev-compaction/recall/<session>/`: one group of chunk files
-per compaction, each under the 4 MiB `$.fs.read` takes, holding only rows no
-earlier group has. Hooks cannot read the session transcript itself: it often
-runs past 4 MiB, and hooks have no Node file access. At `session.start` the
-plugin registers `recall` with `$.tool.register`; the model calls it as
-`mcp__fast-jev-compaction__recall` (a deferred tool, loaded through ToolSearch),
-and a `tool.call` hook answers from the archive followed by the live rows, so a
-call keeps its uncut result:
+per compaction, each under the 4 MiB `$.fs.read` takes. A group holds the
+prompts and replies, and the calls and results no earlier group has (an earlier
+call as its id only); recall's own calls are left out. Hooks cannot read the
+session transcript itself: it often runs past 4 MiB, and hooks have no Node file
+access. At `session.start` the plugin registers `recall` with `$.tool.register`;
+the model calls it as `mcp__fast-jev-compaction__recall` (a deferred tool,
+loaded through ToolSearch), and a `tool.call` hook answers from the archive
+followed by the live rows, so a call keeps its uncut result:
 
 - `query`: keywords ranked by BM25, or a regex when the query holds regex
-  characters (a nested quantifier is matched as literal text); 5 hits per page,
+  characters. A regex that could backtrack without end (a quantified group, a
+  back reference, more than two unbounded quantifiers) is matched as literal
+  text, and a regex that finds nothing is ranked as keywords. 5 hits per page,
   each with the lines around its first match.
-- `expand`: entries in full by `#N` or tool_use_id; a call shows its input and
-  its result, or the file Claude Code saved a large output to (only from
+- `expand`: up to 10 entries in full by `#N` or tool_use_id (a tool_use_id is
+  stable; `#N` can shift as the session grows); a call shows its input and its
+  result, or the file Claude Code saved a large output to (only from
   `<config dir>/projects/<project>/<session>/tool-results/`: the path comes from
   result text, which fetched content can forge). Long text is cut at a line end
   with an `offset` to continue from.
@@ -204,9 +208,11 @@ call keeps its uncut result:
 An answer holds at most 48,000 characters, shared between expanded entries.
 Recall's own calls are not listed. Cut notes end with
 `full text: recall expand ["<tool_use_id>"]` instead of telling the model to run
-the tool again. `$.fs` cannot delete, so the chunks of a session untouched for
-30 days are emptied at the next session start. The ranking and regex guard are
-adapted from [pi-vcc](https://github.com/sting8k/pi-vcc), the answer budget from
+the tool again, when this compaction's rows reached the archive. `$.fs` cannot
+delete, so the chunks of a session untouched for 30 days are emptied at the next
+session start (with `recall` on or off; the session starting is spared). The
+ranking and regex mode are adapted from
+[pi-vcc](https://github.com/sting8k/pi-vcc), the answer budget from
 [pi-blackhole](https://github.com/k0valik/pi-blackhole) (both MIT).
 
 ## Scope and caveat
