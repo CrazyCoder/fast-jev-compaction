@@ -16,8 +16,11 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
 - Hidden content (skill bodies, prompts typed while a tool ran, attachments,
   images and ToolSearch-loaded tools) is read from the conversation's API form
   and folded back as text into the handle-stripped rows; images and deferred
-  tools become placeholders. Token countdowns and the session context the host
-  re-sends are skipped.
+  tools become placeholders. The session context and the reminders the host
+  re-sends or that describe a past moment (token countdown, output style,
+  task-tool nudge, deferred tool list, MCP instructions, editor diagnostics,
+  file-changed notes) are skipped, and removed from rows an earlier compaction
+  folded them into.
 - `maxConcurrentRequests` (default 4); a 429 or 5xx is retried once after 1 s;
   no further request starts after a 401, 403 or no answer; the calls of a
   request that still failed are kept and counted in `stats.requestsFailed`.

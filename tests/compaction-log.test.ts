@@ -160,6 +160,20 @@ describe('Jev transport through the hook', () => {
     expect(linesOf(files)).toEqual([expect.stringMatching(/^\S+Z plugin not compacted \(/)]);
   });
 
+  it('drops stale reminders an earlier fold left in the rows, and counts them as reduction', async () => {
+    const stale = `<system-reminder>\nThe task tools haven't been used recently. ${'nudge '.repeat(800)}\n</system-reminder>`;
+    const rows = readSession().map((row) =>
+      row.toolResults ? { ...row, toolResults: [{ tool_use_id: 'a', text: `${BODY}\n\n${stale}`, isError: false }] } : row,
+    );
+    // Jev keeps every call: the only reduction is the stale reminder.
+    const out = (await registered({ preserveRecentMessages: 1 })['session.compact']!(
+      jevHost(0.99, []),
+      { trigger: 'manual', messages: rows },
+      async () => ({}),
+    )) as { messages?: { toolResults?: { text: string }[] }[] };
+    expect(out.messages?.[2]?.toolResults?.[0]?.text).toBe(BODY);
+  });
+
   it('names failed requests in the outcome summary', () => {
     const stats = { stateTokens: 10, stateStage: 'full', requests: 3, requestsFailed: 1, requestError: 'Jev request failed (401): no' };
     expect(summarize({ messages: [], decisions: [], stats } as never)).toMatch(

@@ -11,9 +11,9 @@ import type { Message } from './types.js';
  * Messages API form shows that content, so it is read from there and folded
  * back as text into the compacted rows.
  *
- * Not folded: the token countdowns (the host sends a fresh one every step) and
- * the session context ahead of the first prompt (environment, CLAUDE.md, skill
- * and tool lists), which the host sends again after a compaction.
+ * Not folded: the session context ahead of the first prompt (environment,
+ * CLAUDE.md, skill and tool lists), which the host sends again after a
+ * compaction, and the transient host reminders TRANSIENT names.
  */
 
 export type ApiBlock = { type: string; [field: string]: unknown };
@@ -26,16 +26,35 @@ export type HiddenAnchor = { toolUseId: string } | { row: Message };
 
 export type HiddenContent = { anchor: HiddenAnchor; text: string };
 
-const TOKEN_COUNT =
-  /^<system-reminder>\s*<total_tokens>(?:\d+|Infinite) tokens left<\/total_tokens>\s*<\/system-reminder>$/;
+/**
+ * Host reminders that are not folded back, by how their text starts: the host
+ * sends a fresh one each step or after a compaction (token countdown, output
+ * style, task-tool nudge, deferred tool list, MCP server instructions), or it
+ * describes a moment that has passed (editor diagnostics, a file changed on
+ * disk, a silence nudge). A user's mid-turn message and a background task's
+ * result are kept: nothing else carries them.
+ */
+const TRANSIENT = [
+  /^<total_tokens>(?:\d+|Infinite) tokens left<\/total_tokens>$/,
+  /^[\w -]+ output style is active\./,
+  /^The task tools haven't been used recently\./,
+  /^<new-diagnostics>/,
+  /^The user hasn't heard from you in a while\b/,
+  /^Note: .+ changed on disk since you last read it\./,
+  /^The following deferred tools are now available via ToolSearch\./,
+  /^# MCP Server Instructions\b/,
+];
+
+const REMINDER = /^<system-reminder>\s*([\s\S]*?)\s*<\/system-reminder>$/;
 
 /** The text the host adds after the results of a ToolSearch that loaded tools. */
 const TOOL_LOADED = 'Tool loaded.';
 
 const PIECE_SEPARATOR = '\n\n';
 
-function isCountdown(text: string): boolean {
-  return TOKEN_COUNT.test(text.trim());
+function isTransient(text: string): boolean {
+  const inner = REMINDER.exec(text.trim())?.[1];
+  return inner !== undefined && TRANSIENT.some((pattern) => pattern.test(inner));
 }
 
 /** Text blocks of a tool_result's content, joined as the host joins them. */
@@ -86,7 +105,7 @@ function resultExtras(block: ApiBlock, own: string): string[] {
   const content = block['content'];
   const text = contentText(content);
   if (text.startsWith(own)) {
-    for (const piece of pieces(text.slice(own.length))) if (!isCountdown(piece)) out.push(piece);
+    for (const piece of pieces(text.slice(own.length))) if (!isTransient(piece)) out.push(piece);
   }
   if (Array.isArray(content)) {
     const images = content.filter((part) => (part as ApiBlock | null)?.type === 'image').length;
@@ -175,7 +194,7 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
       }
       if (block.type !== 'text') continue;
       const text = String(block['text'] ?? '').trim();
-      if (isCountdown(text) || (hasToolReference && text === TOOL_LOADED)) continue;
+      if (isTransient(text) || (hasToolReference && text === TOOL_LOADED)) continue;
       add(anchor, text);
     }
     first = false;
@@ -202,6 +221,37 @@ function sessionContextEnd(blocks: readonly ApiBlock[]): number {
 
 function sameAnchor(a: HiddenAnchor, b: HiddenAnchor): boolean {
   return 'toolUseId' in a ? 'toolUseId' in b && a.toolUseId === b.toolUseId : 'row' in b && a.row === b.row;
+}
+
+/** `text` without its transient reminders (and the blank line before each). */
+function withoutTransient(text: string): string {
+  return text.replace(/(?:\n\n)?<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/g, (match) =>
+    isTransient(match.replace(/^\n\n/, '')) ? '' : match,
+  );
+}
+
+/**
+ * Removes transient reminders from the rows' prompt and tool result texts,
+ * where an earlier compaction folded them in. `chars` is how many characters
+ * went. Rows that change are copies; the input is not modified.
+ */
+export function dropTransientReminders<M extends Message>(messages: readonly M[]): { messages: M[]; chars: number } {
+  let chars = 0;
+  const out = messages.map((message) => {
+    const text = withoutTransient(message.text);
+    let changed = text !== message.text;
+    const toolResults = message.toolResults?.map((result) => {
+      const cleaned = withoutTransient(result.text);
+      if (cleaned === result.text) return result;
+      changed = true;
+      chars += result.text.length - cleaned.length;
+      return { ...result, text: cleaned };
+    });
+    if (!changed) return message;
+    chars += message.text.length - text.length;
+    return { ...message, text, ...(toolResults ? { toolResults } : {}) };
+  });
+  return { messages: out, chars };
 }
 
 /**

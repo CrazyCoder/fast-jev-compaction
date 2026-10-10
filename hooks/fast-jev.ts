@@ -12,7 +12,7 @@ import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
 import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
-import { foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
+import { dropTransientReminders, foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
 import { DECISIONS_MODEL, wireFor, type JevProvider } from '../src/decisions.js';
 import type { ProseSummarizer } from '../src/prose.js';
 import type {
@@ -633,26 +633,29 @@ export const register: Register = (on: On, options: PluginOptions) => {
       // Rows go back without handles, which costs them their hidden content:
       // read it from the API form and fold it back in as text, before the
       // size guards so they measure what is returned. Content after a result
-      // Jev cut is cut the same way.
-      let returned = messages;
-      let measured = result;
-      let hiddenNote = '';
+      // Jev cut is cut the same way. Transient reminders an earlier fold left
+      // in the rows go first.
+      const cleaned = dropTransientReminders(messages);
+      let returned = cleaned.messages;
+      const afterCleaning = result.stats.charsAfter - cleaned.chars;
+      let measured = { ...result, stats: { ...result.stats, charsAfter: afterCleaning } };
+      let hiddenNote = cleaned.chars > 0 ? `; ${cleaned.chars} chars of stale reminders dropped` : '';
       try {
         const view = await $.session.messages({ as: 'api' });
         const cutIds = new Set(
           result.decisions.filter((d) => d.action !== 'keep' && d.reason !== 'pinned').map((d) => d.id),
         );
-        const fold = foldHiddenContent(messages, hiddenContent(event.messages, view as ApiMessage[]), {
+        const fold = foldHiddenContent(cleaned.messages, hiddenContent(event.messages, view as ApiMessage[]), {
           cutIds,
           headChars: resolveOptions(config).truncateHeadChars,
         });
         returned = fold.messages;
-        measured = { ...result, stats: { ...result.stats, charsAfter: result.stats.charsAfter + fold.chars } };
-        hiddenNote = `; hidden content: ${fold.folded} folded back (${fold.chars} chars)${
+        measured = { ...result, stats: { ...result.stats, charsAfter: afterCleaning + fold.chars } };
+        hiddenNote += `; hidden content: ${fold.folded} folded back (${fold.chars} chars)${
           fold.lost > 0 ? `, ${fold.lost} lost` : ''
         }`;
       } catch (error) {
-        hiddenNote = `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
+        hiddenNote += `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
       }
       if (reductionRatio(measured) < config.minReductionRatio) {
         return giveUp(`below ${percent(config.minReductionRatio)} minimum: ${summarize(measured)}${hiddenNote}`);

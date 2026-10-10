@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
+import { dropTransientReminders, foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
 import type { Message } from '../src/index.js';
 
 const countdown = (n: number) => `<system-reminder>\n<total_tokens>${n} tokens left</total_tokens>\n</system-reminder>`;
@@ -93,6 +93,63 @@ function session() {
   ];
   return { rows, api };
 }
+
+describe('transient host reminders', () => {
+  const reminder = (text: string) => `<system-reminder>\n${text}\n</system-reminder>`;
+  const transient = [
+    'Concise output style is active. Be concise: lead with the result.',
+    "The task tools haven't been used recently. If you're working on tasks...",
+    '<new-diagnostics>The following new diagnostic issues were detected:\n\nx.ts: × error</new-diagnostics>',
+    'The user hasn\'t heard from you in a while — say in a few words what you\'re doing, then continue.',
+    'Note: C:\\x\\a.ts changed on disk since you last read it. That\'s usually deliberate.',
+    'The following deferred tools are now available via ToolSearch. Their schemas are NOT loaded:\nTaskCreate',
+    '# MCP Server Instructions\n\nThe following MCP servers have provided instructions',
+  ];
+  const kept = [
+    'The user sent a new message while you were working:\nalso check b.ts',
+    '[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>result</task-notification>',
+    'Contents of b.ts: attached',
+  ];
+
+  it('folds back what the user or a task said, never what the host re-sends or what went stale', () => {
+    const rows: Message[] = [user('go'), call('r1', 'Read'), result('r1', 'file a')];
+    const api: ApiMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'r1' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'r1', content: ['file a', ...[...transient, ...kept].map(reminder)].join('\n\n') },
+          ...transient.map((text) => ({ type: 'text', text: reminder(text) })),
+        ],
+      },
+    ];
+    // One result's extras go back as one piece.
+    const [only, ...none] = hiddenContent(rows, api);
+    expect(none).toEqual([]);
+    expect(only).toEqual({ anchor: { toolUseId: 'r1' }, text: kept.map(reminder).join('\n\n') });
+  });
+});
+
+describe('transient reminders already in the rows', () => {
+  const stale = '<system-reminder>\nConcise output style is active. Be concise.\n</system-reminder>';
+  const said = '<system-reminder>\nThe user sent a new message while you were working:\nstop\n</system-reminder>';
+
+  it('removes them from tool results and prompts, keeps everything else, and counts the characters', () => {
+    const rows: Message[] = [
+      user(`go\n\n${stale}`),
+      call('r1', 'Read'),
+      result('r1', `file a\n\n${stale}\n\n${said}`),
+      result('r2', 'file b'),
+    ];
+    const out = dropTransientReminders(rows);
+    expect(out.messages[0]!.text).toBe('go');
+    expect(out.messages[2]!.toolResults![0]!.text).toBe(`file a\n\n${said}`);
+    expect(out.messages[3]).toBe(rows[3]);
+    expect(out.chars).toBe(2 * (stale.length + 2));
+    expect(rows[0]!.text).toContain(stale);
+  });
+});
 
 describe('hidden content on a second compaction', () => {
   const context = [
