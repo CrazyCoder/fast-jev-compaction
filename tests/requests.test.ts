@@ -123,6 +123,7 @@ describe('Jev request policy', () => {
     expect(byId.get('t3')).toBe('keep');
     expect(byId.get('t2')).toBe('stub_call');
     expect(out.stats.requestsFailed).toBe(1);
+    expect(out.stats.requestError).toBe('Jev request failed (500): down');
   });
 
   it('starts no more requests after a 401/403 or no answer, and throws when nothing was answered', async () => {

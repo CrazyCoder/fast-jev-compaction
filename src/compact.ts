@@ -559,6 +559,7 @@ export async function compact(
   let fitted: { tokens: number; stage: string } = { tokens: 0, stage: '' };
   let requests = 0;
   let requestsFailed = 0;
+  let requestError: string | undefined;
   let answers = new Map<string, CallAnswer>();
   if (candidates.length > 0) {
     const goal = resolved.instructions
@@ -580,6 +581,8 @@ export async function compact(
     if (jobs.length > 0 && asked.failures.length === jobs.length) throw asked.failures[0];
     answers = asked.answers;
     requestsFailed = asked.failures.length;
+    const failure = asked.failures[0];
+    if (failure !== undefined) requestError = failure instanceof Error ? failure.message : String(failure);
   }
 
   const decisions =
@@ -628,6 +631,7 @@ export async function compact(
       stateStage: fitted.stage,
       requests,
       requestsFailed,
+      ...(requestError === undefined ? {} : { requestError }),
       ms: Date.now() - started,
     },
   };

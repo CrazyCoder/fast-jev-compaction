@@ -64,8 +64,9 @@ describe('OpenAI Decisions wire', () => {
 
   it('fails like the System One wire on HTTP errors and bad bodies', () => {
     expect(() => parseDecisionsResponse(429, false, 'slow')).toThrow(JevRequestError);
-    expect(() => parseDecisionsResponse(200, true, 'not json')).toThrow('malformed JSON');
-    expect(() => parseDecisionsResponse(200, true, '{"answers":{}}')).toThrow('missing answers');
+    expect(() => parseDecisionsResponse(429, false, 'slow')).toThrow('OpenAI Decisions request failed (429): slow');
+    expect(() => parseDecisionsResponse(200, true, 'not json')).toThrow('OpenAI Decisions returned malformed JSON');
+    expect(() => parseDecisionsResponse(200, true, '{"answers":{}}')).toThrow('OpenAI Decisions response is missing answers');
   });
 
   it('JevClient speaks it with provider: openai', async () => {

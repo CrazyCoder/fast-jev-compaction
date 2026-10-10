@@ -60,8 +60,8 @@ export function buildJevRequest(
 export class JevRequestError extends Error {
   readonly status: number;
 
-  constructor(status: number, detail: string) {
-    super(`Jev request failed (${status}): ${detail}`);
+  constructor(status: number, detail: string, service = 'Jev') {
+    super(`${service} request failed (${status}): ${detail}`);
     this.name = 'JevRequestError';
     this.status = status;
   }

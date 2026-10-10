@@ -374,7 +374,9 @@ export function summarize(result: CompactResult): string {
   return `${percent(reductionRatio(result))} reduction; ${
     parts.join(', ') || 'no tool calls'
   }; state ~${stats.stateTokens} tokens (${stats.stateStage}) in ${stats.requests} request(s)${
-    stats.requestsFailed > 0 ? `, ${stats.requestsFailed} failed (calls kept)` : ''
+    stats.requestsFailed > 0
+      ? `, ${stats.requestsFailed} failed (calls kept${stats.requestError ? `; ${stats.requestError}` : ''})`
+      : ''
   }`;
 }
 

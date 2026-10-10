@@ -14,6 +14,9 @@ export const OPENAI_DECISIONS_URL = 'https://api.openai.com/v1/decisions';
 /** The only model the Decisions beta serves. */
 export const DECISIONS_MODEL = 'gpt-6-luna';
 
+/** How errors from this wire name the service. */
+const SERVICE = 'OpenAI Decisions';
+
 type Predicate = { type: 'predicate'; name: string; instructions: string };
 
 function predicates(questions: JevQuestions): Predicate[] {
@@ -78,15 +81,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * the model declined to judge, so the call and its result are kept.
  */
 export function parseDecisionsResponse(status: number, ok: boolean, text: string): JevResponse {
-  if (!ok) throw new JevRequestError(status, text.slice(0, 200));
+  if (!ok) throw new JevRequestError(status, text.slice(0, 200), SERVICE);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error('Jev returned malformed JSON');
+    throw new Error(`${SERVICE} returned malformed JSON`);
   }
   if (!isRecord(parsed) || !Array.isArray(parsed['answers'])) {
-    throw new Error('Jev response is missing answers');
+    throw new Error(`${SERVICE} response is missing answers`);
   }
   const answers: Record<string, JevAnswer> = {};
   for (const raw of parsed['answers']) {

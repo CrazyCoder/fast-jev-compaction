@@ -193,8 +193,10 @@ describe('Jev transport through the hook', () => {
   });
 
   it('names failed requests in the outcome summary', () => {
-    const stats = { stateTokens: 10, stateStage: 'full', requests: 3, requestsFailed: 1 };
-    expect(summarize({ messages: [], decisions: [], stats } as never)).toMatch(/in 3 request\(s\), 1 failed \(calls kept\)$/);
+    const stats = { stateTokens: 10, stateStage: 'full', requests: 3, requestsFailed: 1, requestError: 'Jev request failed (401): no' };
+    expect(summarize({ messages: [], decisions: [], stats } as never)).toMatch(
+      /in 3 request\(s\), 1 failed \(calls kept; Jev request failed \(401\): no\)$/,
+    );
   });
 });
 

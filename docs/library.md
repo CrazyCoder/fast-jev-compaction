@@ -47,13 +47,26 @@ Jev model is also served through OpenRouter, at
 `https://openrouter.ai/api/alpha/decisions`, with `model` left at
 `jev-latest` and an OpenRouter key in place of a TypeSafe one.
 
+`provider: 'openai'` on `compactMessages` or `JevClient` asks OpenAI's Decisions API
+(`https://api.openai.com/v1/decisions`, `gpt-6-luna`) instead: the state goes
+as text `input`, each `noul` question as a named `predicate`, and a refusal
+answers 1 (keep). `buildDecisionsRequest`, `parseDecisionsResponse` and
+`wireFor(provider)` are the request and response halves for your own
+transport.
+
+`hiddenContent(rows, apiView)` and `foldHiddenContent(messages, hidden)` are
+what the Claude Code hook uses to put back the hidden entries (skill bodies,
+prompts typed during a tool, attachments) that rows returned without their
+engine handle lose; see [hooks/README.md](../hooks/README.md).
+
 ## Options
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `apiKey` | `TYPESAFE_API_KEY` | TypeSafe API key (`compactMessages`/`JevClient`) |
-| `model` | `jev-latest` | Jev model name |
-| `baseUrl` | `https://api.typesafe.ai/v1/systemone` | System One endpoint |
+| `provider` | `jev` | `compactMessages`/`JevClient`: `jev` (System One) or `openai` (Decisions API) |
+| `apiKey` | `TYPESAFE_API_KEY` (`OPENAI_API_KEY` with `openai`) | Key (`compactMessages`/`JevClient`) |
+| `model` | `jev-latest` (`gpt-6-luna` with `openai`) | Model name |
+| `baseUrl` | the provider's endpoint | Endpoint URL |
 | `fetch` | native `fetch` | Injectable fetch implementation for tests |
 | `goal` | last 3 user prompts | Ongoing task description included in the state |
 | `keepMode` | `rank` | `rank` keeps the best-scored calls within the token budgets below; `threshold` compares against `keepThreshold` |

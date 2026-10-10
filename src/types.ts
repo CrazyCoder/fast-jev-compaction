@@ -204,6 +204,8 @@ export interface CompactResult {
     requests: number;
     /** Requests that failed after their retry; their calls were kept. */
     requestsFailed: number;
+    /** The first such failure's message, when there was one. */
+    requestError?: string;
     ms: number;
   };
 }
