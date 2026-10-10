@@ -465,16 +465,70 @@ function debugLog($: UiLog, text: string): void {
   $.ui.log(text, { to: 'debug' });
 }
 
+/** Lines the compaction log keeps; older ones are dropped. */
+export const COMPACTION_LOG_LINES = 200;
+
+type LogHost = UiLog & {
+  env: { get: (name: string) => Promise<string | undefined> };
+  fs: {
+    exists: (path: string) => Promise<boolean>;
+    read: (path: string) => Promise<string>;
+    write: (path: string, text: string) => Promise<void>;
+  };
+};
+
+/**
+ * The plugin's own log, `<config dir>/fast-jev-compaction/compactions.log`, the
+ * config dir being `CLAUDE_CONFIG_DIR` or `~/.claude`. The debug log exists only
+ * under `--debug`, never in the desktop app, so each outcome is kept here too.
+ */
+export async function compactionLogPath($: Pick<LogHost, 'env'>): Promise<string | undefined> {
+  const configDir = await $.env.get('CLAUDE_CONFIG_DIR');
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'));
+  const base = configDir || (home ? `${home}/.claude` : undefined);
+  return base ? `${base.replace(/\\/g, '/').replace(/\/+$/, '')}/fast-jev-compaction/compactions.log` : undefined;
+}
+
+// $.fs has no append, so a line is a read and a whole write: this session's
+// appends run one at a time.
+let logQueue: Promise<void> = Promise.resolve();
+
+/** Appends one timestamped line, keeping the newest COMPACTION_LOG_LINES; never throws. */
+export function appendCompactionLog($: LogHost, line: string, now: Date = new Date()): Promise<void> {
+  const appended = logQueue.then(() => writeCompactionLine($, line, now)).catch(() => undefined);
+  logQueue = appended;
+  return appended;
+}
+
+async function writeCompactionLine($: LogHost, line: string, now: Date): Promise<void> {
+  try {
+    const path = await compactionLogPath($);
+    if (!path) return;
+    // Only a missing log starts afresh; one that cannot be read is left alone.
+    const previous = (await $.fs.exists(path)) ? await $.fs.read(path) : '';
+    const lines = previous.split('\n').filter((l) => l.length > 0);
+    lines.push(`${now.toISOString()} ${line.replace(/\s*\n\s*/g, ' ')}`);
+    await $.fs.write(path, `${lines.slice(-COMPACTION_LOG_LINES).join('\n')}\n`);
+  } catch (error) {
+    debugLog($, `compaction log not written (${error instanceof Error ? error.message : String(error)})`);
+  }
+}
+
 const TOAST_REASON_CHARS = 80;
 
-/** One short toast per compaction; the details are in the debug log. */
-function notify(
-  $: UiLog & { ui: { toast: (text: string, options?: { timeoutMs?: number }) => void } },
+/**
+ * One short toast per compaction; the details go to the debug log and, as
+ * one line labelled with the trigger, to the compaction log.
+ */
+async function notify(
+  $: LogHost & { ui: { toast: (text: string, options?: { timeoutMs?: number }) => void } },
+  trigger: string,
   detail: string,
   toast: string,
-): void {
+): Promise<void> {
   debugLog($, detail);
   $.ui.toast(`fast-jev: ${toast}`, { timeoutMs: 8_000 });
+  await appendCompactionLog($, `${trigger} ${detail}`);
 }
 
 /** The head of a fallback reason, before its `: details` part, for a toast. */
@@ -499,12 +553,12 @@ export const register: Register = (on: On, options: PluginOptions) => {
       return { skip: 'fast-jev-compaction does not handle speculative compactions' };
     }
 
-    const giveUp = (why: string) => {
+    const giveUp = async (why: string) => {
       if (mayUseBuiltin(event.trigger, configured.builtinFallback)) {
-        notify($, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
+        await notify($, event.trigger, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
         return next(event);
       }
-      notify($, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
+      await notify($, event.trigger, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
       const reason = why.length > 200 ? `${why.slice(0, 200)}…` : why;
       return { skip: `fast-jev-compaction: ${reason}; conversation left as it is` };
     };
@@ -549,8 +603,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
           `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target: ${summarize(result)}`,
         );
       }
-      notify(
+      await notify(
         $,
+        event.trigger,
         `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})`,
         `compacted, ${percent(reductionRatio(result))} smaller (${messages.length}/${event.messages.length} messages)`,
       );
@@ -582,6 +637,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         // Its outcome never comes back here, so wait as after a skip; a compaction
         // that worked brings usage under compactAtPercent, which clears the wait.
         retryAtPercent = used + RETRY_AFTER_SKIP_PERCENT;
+        await appendCompactionLog($, `auto-compact at ${Math.round(used)}%: headless session, queued /compact`);
         void $.command.run({ command: 'compact' }).catch((queued: unknown) =>
           debugLog($, `auto-compact skipped (${queued instanceof Error ? queued.message : String(queued)})`),
         );

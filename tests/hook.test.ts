@@ -675,6 +675,7 @@ describe('auto-compaction at compactAtPercent', () => {
       session: { usage: async () => ({ context: { percent: 80 } }), compact },
       command: { run: async (input: { command: string }) => (commands.push(input.command), { text: '' }) },
       ui: { log: (text: string) => log.push(text) },
+      env: { get: async () => undefined },
     };
     const run = () => hooks['turn.complete']!($, { reason: 'answer' }, async () => ({ text: 'answer' }));
     return { run, commands, log };

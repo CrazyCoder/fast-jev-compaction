@@ -18,10 +18,20 @@ describe('turn.complete in a headless session', () => {
       },
       command: { run: async () => { queued++; } },
       ui: { log: (t: string) => logs.push(t), toast: () => {} },
+      env: { get: async (name: string) => (name === 'HOME' ? '/home/me' : undefined) },
+      fs: {
+        exists: async (path: string) => files.has(path),
+        read: async (path: string) => files.get(path)!,
+        write: async (path: string, text: string) => { files.set(path, text); },
+      },
     };
+    const files = new Map<string, string>();
     for (let i = 0; i < 3; i++) await handlers['turn.complete']($, { reason: 'answer' }, async () => undefined);
     expect(compacts).toBe(1);
     expect(queued).toBe(1);
     expect(logs).toEqual([]);
+    expect(files.get('/home/me/.claude/fast-jev-compaction/compactions.log')).toMatch(
+      /^\S+Z auto-compact at 70%: headless session, queued \/compact\n$/,
+    );
   });
 });

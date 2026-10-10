@@ -29,7 +29,8 @@ Restart Claude Code or run `/reload-plugins`. `/compact` and auto-compaction
 now go through Jev; a one-line toast reports the outcome (`fast-jev:
 compacted, N% smaller`, `built-in summary (…)`, or `not compacted (…)`). The
 details, including the per-call decisions, go to the debug log only
-(`claude --debug`), never into the transcript.
+(`claude --debug`), never into the transcript, and each outcome is also one
+line in `~/.claude/fast-jev-compaction/compactions.log`.
 
 **Updating.** Claude Code updates a plugin only when its version changes.
 Set `autoUpdate: true` on the marketplace entry, or run
