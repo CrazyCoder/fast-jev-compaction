@@ -303,7 +303,7 @@ export async function compactSession(
   const result = await compact(
     messages,
     jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl, onRedact, config.provider),
-    config,
+    { ...config, recallNotes: config.recall },
     { summarize, sleep },
   );
   return { result, messages: toSessionMessages(messages, result.messages) };

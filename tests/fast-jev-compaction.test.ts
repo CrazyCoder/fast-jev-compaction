@@ -394,6 +394,22 @@ describe('decisions', () => {
     );
   });
 
+  it('points a cut at the recall tool, by tool_use_id, when recall notes are on', () => {
+    const messages = transcript();
+    const calls = collectToolCalls(messages, 0);
+    const id = messages[2]!.toolResults![0]!.tool_use_id;
+    const stub = [decideCall(calls[0]!, { keepCall: 0.1, keepResult: 0.1 }, { keepThreshold: 0.5, dropCalls: false })];
+    messages[1]!.toolUses[0]!.input = { file_path: 'x'.repeat(1000) };
+    const kept = applyDecisions(messages, stub, collectToolCalls(messages, 0), 50, true);
+    expect(kept[2]?.toolResults?.[0]?.text).toMatch(
+      new RegExp(`\\[fast-jev-compaction truncated \\d+ chars of this tool result; full text: recall expand \\["${id}"\\]\\]$`),
+    );
+    const inputChars = JSON.stringify(messages[1]!.toolUses[0]!.input).length;
+    expect(kept[1]?.toolUses[0]?.input['note']).toBe(
+      `[fast-jev-compaction truncated ${inputChars - 50} chars of this tool input; full text: recall expand ["${id}"]]`,
+    );
+  });
+
   it('never cuts the head of a dropped result inside a surrogate pair', () => {
     const emoji = '\u{1F600}';
     const note = (omitted: number): string =>

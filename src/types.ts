@@ -140,6 +140,12 @@ export interface CompactOptions {
    * marker. User prose is never matched. Default true.
    */
   trimHostText?: boolean;
+  /**
+   * Cut notes name the recall call that gets the rest (`recall expand
+   * ["<tool_use_id>"]`) instead of saying to run the tool again. For hosts that
+   * offer the recall tool. Default false.
+   */
+  recallNotes?: boolean;
   /** Characters of a trimmed host block to retain. Default 200. */
   hostTextHeadChars?: number;
   /** Characters of a task-notification's `<result>` (a subagent's final report) retained; 0 trims it like any host block. Default 4000. */
@@ -169,6 +175,7 @@ export interface ResolvedCompactOptions {
   dropCalls: boolean;
   truncateHeadChars: number;
   trimHostText: boolean;
+  recallNotes: boolean;
   hostTextHeadChars: number;
   taskResultHeadChars: number;
   oldProse: OldProseMode;

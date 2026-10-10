@@ -21,18 +21,27 @@ function hooks(options: Record<string, unknown> = {}) {
 const ROOT = '/home/me/.claude/fast-jev-compaction/recall/sess-1';
 const BODY = 'export const x = 1;\n'.repeat(400);
 
-function host(live: unknown[] = []) {
+const failing = async () => ({ status: 500, ok: false, text: 'down' });
+
+/** Jev answering every question with 0.01: every result is cut. */
+const cutAll = async (_url: string, init: { body: string }) => {
+  const { questions } = JSON.parse(init.body) as { questions: Record<string, unknown> };
+  const answers = Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul', noul: 0.01 }]));
+  return { status: 200, ok: true, text: JSON.stringify({ answers }) };
+};
+
+function host(live: unknown[] = [], fetch: typeof failing | typeof cutAll = failing) {
   const { fs, files } = memoryFs();
   const register = vi.fn(async (spec: { name: string }) => ({ tool: `mcp__fast-jev-compaction__${spec.name}` }));
   const $ = {
-    env: { get: async (name: string) => ({ HOME: '/home/me' })[name] },
+    env: { get: async (name: string) => ({ HOME: '/home/me', TYPESAFE_API_KEY: 'k' })[name] },
     fs,
     settings: { read: async () => ({}) },
     clock: { sleep: () => new Promise<void>(() => {}) },
     ui: { log: () => {}, toast: () => {} },
     tool: { register },
     session: { id: async () => 'sess-1', messages: async (args?: unknown) => (args ? [] : live), usage: async () => ({ context: {} }) },
-    http: { fetch: async () => ({ status: 500, ok: false, text: 'down' }) },
+    http: { fetch },
   };
   return { $, files, register };
 }
@@ -69,6 +78,18 @@ describe('recall in the hook', () => {
     expect(full.result).toContain(BODY.slice(0, 200));
     const listed = (await call($, { tool: RECALL_TOOL, range: [1, 9] }, async () => ({}))) as { result: string };
     expect(listed.result).toContain('#3 prompt Next, fix it.');
+  });
+
+  it('writes cut notes that name the recall call', async () => {
+    const { $ } = host([], cutAll);
+    const rows = [...transcript(), userRow('ok'), { role: 'assistant', text: 'Done.', toolUses: [] }];
+    const out = (await hooks({ preserveRecentMessages: 1, keepMode: 'threshold' })['session.compact']!(
+      $,
+      { trigger: 'manual', messages: rows },
+      async () => ({}),
+    )) as { messages: { toolResults?: { text: string }[] }[] };
+    const cut = out.messages.flatMap((m) => m.toolResults ?? [])[0]!.text;
+    expect(cut).toMatch(/; full text: recall expand \["toolu_build"\]\]$/);
   });
 
   it('does nothing with recall: false', async () => {

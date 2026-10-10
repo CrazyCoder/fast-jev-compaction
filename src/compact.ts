@@ -37,6 +37,7 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   maxRequestTokens: 30_000,
   maxConcurrentRequests: 4,
   truncateHeadChars: 300,
+  recallNotes: false,
   dropCalls: false,
   trimHostText: true,
   hostTextHeadChars: 200,
@@ -85,6 +86,7 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
     dropCalls: typeof options.dropCalls === 'boolean' ? options.dropCalls : DEFAULT_OPTIONS.dropCalls,
     trimHostText:
       typeof options.trimHostText === 'boolean' ? options.trimHostText : DEFAULT_OPTIONS.trimHostText,
+    recallNotes: options.recallNotes === true,
     hostTextHeadChars: Math.max(
       0,
       Math.floor(finite(options.hostTextHeadChars, DEFAULT_OPTIONS.hostTextHeadChars)),
@@ -332,7 +334,12 @@ function splitsSurrogatePair(text: string, index: number): boolean {
   return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
 }
 
-function truncatedResultText(text: string, isError: boolean, headChars: number): string {
+/** How a cut note says to get the rest: the recall tool by id, or running the tool again. */
+function restOf(id: string, recall: boolean, fallback: string): string {
+  return recall ? `; full text: recall expand ["${id}"]` : fallback;
+}
+
+function truncatedResultText(text: string, isError: boolean, headChars: number, id = '', recall = false): string {
   if (text.length <= headChars + 120) return text;
   // End the head on a code point boundary: cutting a surrogate pair in half
   // would leave a lone surrogate in the rebuilt transcript.
@@ -340,15 +347,15 @@ function truncatedResultText(text: string, isError: boolean, headChars: number):
   const head = cut > 0 ? `${text.slice(0, cut)}\n` : '';
   return `${head}[fast-jev-compaction truncated ${text.length - cut} chars of this tool result${
     isError ? ' (error)' : ''
-  }; re-run the tool if needed]`;
+  }${restOf(id, recall, '; re-run the tool if needed')}]`;
 }
 
-function truncatedInput(input: Record<string, unknown>, headChars: number): Record<string, unknown> {
+function truncatedInput(input: Record<string, unknown>, headChars: number, id: string, recall: boolean): Record<string, unknown> {
   const json = JSON.stringify(input);
   if (json.length <= headChars + 120) return input;
   return {
     input_head: json.slice(0, headChars),
-    note: `[fast-jev-compaction truncated ${json.length - headChars} chars of this tool input]`,
+    note: `[fast-jev-compaction truncated ${json.length - headChars} chars of this tool input${restOf(id, recall, '')}]`,
   };
 }
 
@@ -356,6 +363,7 @@ function truncatedInput(input: Record<string, unknown>, headChars: number): Reco
  * Rebuilds the conversation from the decisions. A dropped call disappears
  * together with its result; a dropped result keeps a bounded head and note;
  * a stubbed call keeps its tool name with input and result both cut to a head.
+ * With `recallNotes`, each cut note names the recall call that gets the rest.
  * Messages that lose all their content are removed; untouched messages are
  * returned as the same objects they came in as.
  */
@@ -364,6 +372,7 @@ export function applyDecisions(
   decisions: readonly CallDecision[],
   calls: readonly ToolCall[],
   headChars: number,
+  recallNotes = false,
 ): Message[] {
   const byId = new Map(calls.map((call) => [call.id, call]));
   const actions = new Map<string, CallDecision['action']>();
@@ -392,12 +401,9 @@ export function applyDecisions(
       .map((tool) => {
         const action = actions.get(tool.tool_use_id);
         if (action !== 'drop_result' && action !== 'stub_call') return tool;
-        const text = truncatedResultText(
-          tool.text ?? '',
-          tool.isError ?? false,
-          headChars,
-        );
-        const input = action === 'stub_call' ? truncatedInput(tool.input, headChars) : tool.input;
+        const text = truncatedResultText(tool.text ?? '', tool.isError ?? false, headChars, tool.tool_use_id, recallNotes);
+        const input =
+          action === 'stub_call' ? truncatedInput(tool.input, headChars, tool.tool_use_id, recallNotes) : tool.input;
         if ((tool.text ?? '') === text && input === tool.input) return tool;
         const copy: ToolUse = {
           tool_use_id: tool.tool_use_id,
@@ -413,7 +419,7 @@ export function applyDecisions(
       .map((result) => {
         const action = actions.get(result.tool_use_id);
         if (action !== 'drop_result' && action !== 'stub_call') return result;
-        const text = truncatedResultText(result.text, result.isError ?? false, headChars);
+        const text = truncatedResultText(result.text, result.isError ?? false, headChars, result.tool_use_id, recallNotes);
         return text === result.text
           ? result
           : {
@@ -606,6 +612,7 @@ export async function compact(
     decisions,
     calls,
     resolved.truncateHeadChars,
+    resolved.recallNotes,
   );
   return {
     messages: kept,
