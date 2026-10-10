@@ -20,7 +20,7 @@ project's many forks; the full lineage is under
 | Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
 | `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
 | OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction) (235a6c6) |
-| Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. `sessions` searches past sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. With [qmd](https://github.com/tobi/qmd) installed, that search goes through a qmd index of the sessions (`sessionIndex: "off"` keeps it on the scan); `/recall-index` builds it for all projects or the ones you name (`/recall-index billing-api C:\work`), shows it, or removes it. It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. Cut notes name the call that gets the rest instead of "re-run the tool". `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader and notes: this fork |
+| Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. `sessions` searches past sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. With [qmd](https://github.com/tobi/qmd) installed, that search goes through an index of the sessions, which `/recall-index` builds for all projects or the ones you name (see [Searching past sessions](#searching-past-sessions)). It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. Cut notes name the call that gets the rest instead of "re-run the tool". `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader and notes: this fork |
 | Adaptive prose digest | Each compaction keeps your old prose verbatim while that frees enough. When it would be refused, as happens after two or three compactions in a long session, the prose older than `recentTurns` becomes a digest (cut results keep 100-character heads), and later compactions start with the digest, so multi-day sessions keep compacting instead of getting stuck. Pros, cons and options: [Adaptive prose digest](#adaptive-prose-digest) | This fork; the digest is QuanticPotatoes' `oldProse: digest` |
 | Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
 
@@ -151,7 +151,8 @@ original message, call and result back from the transcript.
   compaction on; with the adaptive default none was. The multi-day one compacted
   38 times: the first three verbatim (27%, 37%, 43% of the context left), every
   later one between 4% and 26%.
-- The switch happens at most once per session and needs no setting.
+- The switch needs no setting: each session gets verbatim prose until it needs
+  the digest.
 
 **Cons**
 
@@ -182,6 +183,53 @@ original message, call and result back from the transcript.
 Each outcome line in `~/.claude/fast-jev-compaction/compactions.log` names the
 prose mode used (`old prose digest: …`), and ends with
 `verbatim prose was refused (…)` on the compaction that switched.
+
+## Searching past sessions
+
+The `recall` tool also searches your other sessions, so you can ask "see how we
+set up jscpd in the billing-api session and do the same here". The model calls
+it with `sessions: "<keywords>"`, in this project by default, in another with
+`project: "<part of its name or path>"`, or in all with `project: "all"`. The
+current session is not among the hits, since recall searches it directly; a last
+line says how many matches it holds.
+
+There are two ways to search, and recall picks one for you:
+
+- **Transcript scan** (no setup): reads the session transcripts under
+  `~/.claude/projects/` directly, with ripgrep when it is installed to pick the
+  files. Fast enough for one project; across many projects a broad query can
+  take seconds.
+- **Session index**: with [qmd](https://github.com/tobi/qmd) installed
+  (`npm install -g @tobilu/qmd`; recall never installs it), each session is
+  exported as markdown (prompts, replies, calls with the head of their results)
+  to `~/.claude/fast-jev-compaction/sessions/` and indexed in a qmd index of its
+  own, `fast-jev-sessions`, apart from your other qmd collections. Searches
+  across many projects then stay fast, and hits are ranked across sessions. The
+  exports and the index are readable by you only, and an export goes when Claude
+  Code deletes its transcript.
+
+Without any command, the first cross-session search builds the index for all
+projects in the background (that search is answered by the scan), and every
+later search adds the sessions that changed. To build it yourself, or for some
+projects only, use `/recall-index`:
+
+| You want to | Run |
+| -- | -- |
+| See what is indexed | `/recall-index` |
+| Index every project | `/recall-index all` |
+| Index this project | `/recall-index .` |
+| Index a project by name or path | `/recall-index billing-api` or `/recall-index C:\work\billing-api` |
+| Index every project under a folder | `/recall-index C:\work` |
+| Take a project out | `/recall-index remove billing-api` |
+| Delete the index and exports | `/recall-index remove` |
+
+Names match any part of a project's folder name; paths take any slash style or
+case, `~/…`, or a path relative to this project. Several targets can be given,
+separated by spaces or commas; quote a path with spaces. The command waits for
+the build and reports the sessions, projects, time and index size. Once you
+choose projects, only those are indexed and kept up to date; a search elsewhere
+uses the scan. `sessionIndex: "off"` turns the index off. The details are in
+[hooks/README.md](hooks/README.md#recall-index).
 
 ## How it works
 

@@ -656,11 +656,16 @@ export const register: Register = (on: On, options: PluginOptions) => {
   if (configured.recall) {
     on('session.start', async ($, event, next) => {
       const started = await next(event);
-      try {
-        await $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA });
-        await $.command.register(RECALL_INDEX_COMMAND);
-      } catch (error) {
-        debugLog($, `recall: ${error instanceof Error ? error.message : String(error)}`);
+      // Each on its own: a host without one still gets the other.
+      for (const registration of [
+        () => $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA }),
+        () => $.command.register(RECALL_INDEX_COMMAND),
+      ]) {
+        try {
+          await registration();
+        } catch (error) {
+          debugLog($, `recall: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       return started;
     });

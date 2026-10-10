@@ -225,7 +225,7 @@ copies after each boundary, and keeps each call's first, uncut result:
   of only stopwords or single characters is refused. This session is not among
   the results, since `query` searches it live and in full; when the searched
   projects include it, a last line counts its matches
-  (`Also in this session: 121 matches; …`). Hits are numbered by rank and
+  (`Also in this session: <n> matches; …`). Hits are numbered by rank and
   labelled with the project, the date, the session title (or first prompt) and
   the session id; open one with `session`. With qmd installed and
   `sessionIndex: "auto"` (the default), the search goes through a qmd index
@@ -287,9 +287,9 @@ that has spaces. A name that matches nothing is reported, and nothing is built
 for it.
 
 The command waits for the build and reports what it did, for example
-`Indexed 292 sessions in 14 projects (…) in 18.4 s; index 165.6 MB.`. Once
-projects are chosen, later searches keep only those up to date; a search in any
-other project scans its transcripts. An index the first search built for all
+`Indexed <n> sessions in <m> projects (<names>) in <seconds> s; index <size>.`.
+Once projects are chosen, later searches keep only those up to date; a search in
+any other project scans its transcripts. An index the first search built for all
 projects keeps covering all of them. Without qmd the command says how to install
 it (`npm install -g @tobilu/qmd`); recall never installs it.
 

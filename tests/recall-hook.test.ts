@@ -99,6 +99,13 @@ describe('recall in the hook', () => {
     expect(toolRegister).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall' }));
   });
 
+  it('registers /recall-index even when the tool cannot be registered', async () => {
+    const { $, toolRegister, commandRegister } = host('/home/me');
+    toolRegister.mockRejectedValueOnce(new Error('tools are not supported here'));
+    await hooks()['session.start']!($, {}, async () => ({ cwd: '.' }));
+    expect(commandRegister).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall-index' }));
+  });
+
   it('registers /recall-index and answers it with the recall script', async () => {
     const home = homeWithTranscript();
     const { $, runs, commandRegister } = host(home);
