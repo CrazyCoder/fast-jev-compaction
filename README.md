@@ -73,9 +73,10 @@ claude plugin marketplace add /path/to/jetcompact
 claude plugin install jetcompact@crazycoder
 ```
 
-Disable any other install of the plugin first
-(`claude plugin disable jetcompact@<marketplace>`), so only one compaction hook
-runs.
+Disable any other compaction plugin first, such as fast-jev-compaction or
+another of its forks
+(`claude plugin disable fast-jev-compaction@<marketplace>`), so only one
+compaction hook runs.
 
 ## Configure
 
@@ -320,7 +321,7 @@ JetCompact adds is listed under [Added in JetCompact](#added-in-jetcompact).
 
 ### Compared
 
-|  | upstream 0.3.0 | ferrisworks 0.5.4 | QuanticPotatoes 0.8.0 | JetCompact 0.10.0 |
+|  | upstream 0.3.0 | ferrisworks 0.5.4 | QuanticPotatoes 0.8.0 | JetCompact |
 | -- | -- | -- | -- | -- |
 | Tool calls kept | Absolute 0.5 threshold | Same | Rank within token budgets | Same |
 | Dropped calls | Deleted | Stub note | Stub note | Stub note |
