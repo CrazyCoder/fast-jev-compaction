@@ -36,6 +36,65 @@ function fsHost(files: Map<string, string>, env: Record<string, string> = { HOME
 
 const linesOf = (files: Map<string, string>) => files.get(LOG)!.split('\n').filter(Boolean);
 
+type Hook = (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>;
+
+/** The hooks `register` installs with the given plugin options, by event name. */
+function registered(options: Record<string, unknown>): Record<string, Hook> {
+  const hooks: Record<string, Hook> = {};
+  (register as unknown as (on: unknown, options: unknown) => void)(
+    (event: string, hook: Hook) => (hooks[event] = hook),
+    options,
+  );
+  return hooks;
+}
+
+/** A host whose Jev answers every question with `noul`; `api` is the conversation's API form. */
+function jevHost(noul: number, api?: unknown[], bodies: string[] = []) {
+  return {
+    env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
+    settings: { read: async () => ({}) },
+    clock: { sleep: () => new Promise<void>(() => {}) },
+    ui: { log: () => {}, toast: () => {} },
+    session: { usage: async () => ({ context: {} }), ...(api && { messages: async () => api }) },
+    http: {
+      fetch: async (_url: string, init: { body: string }) => {
+        bodies.push(init.body);
+        const { questions } = JSON.parse(init.body) as { questions: Record<string, unknown> };
+        const answers = Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul', noul }]));
+        return { status: 200, ok: true, text: JSON.stringify({ answers }) };
+      },
+    },
+  };
+}
+
+const BODY = 'line\n'.repeat(200);
+
+/** A prompt and a Skill call as rows, and as the API form, where the skill's `body` follows its result. */
+function skillSession(body: string) {
+  return {
+    rows: [
+      { role: 'user', text: 'Use the skill.', toolUses: [] },
+      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 's', tool: 'Skill', input: {} }] },
+      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 's', text: 'Launching skill: x', isError: false }] },
+    ],
+    api: [
+      { role: 'user', content: [{ type: 'text', text: 'Use the skill.' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 's' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 's', content: 'Launching skill: x' }, { type: 'text', text: body }] },
+    ],
+  };
+}
+
+/** A prompt, one Read call with a long result, and a reply. */
+function readSession(prompt = 'go') {
+  return [
+    { role: 'user', text: prompt, toolUses: [] },
+    { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Read', input: { file_path: 'a.ts' }, text: BODY }] },
+    { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: BODY, isError: false }] },
+    { role: 'assistant', text: 'Done.', toolUses: [] },
+  ];
+}
+
 describe('Jev transport through the hook', () => {
   it('reports a fetch that gets no answer as a JevTransportError', async () => {
     const asker = jevAsker(async () => {
@@ -46,141 +105,50 @@ describe('Jev transport through the hook', () => {
 
   it('passes /compact instructions to Jev', async () => {
     const bodies: string[] = [];
-    const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
-    (register as unknown as (on: unknown, options: unknown) => void)(
-      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
-      { preserveRecentMessages: 1 },
-    );
-    const body = 'line\n'.repeat(200);
-    const messages = [
-      { role: 'user', text: 'Fix it.', toolUses: [] },
-      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Read', input: { file_path: 'a.ts' }, text: body }] },
-      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: body, isError: false }] },
-      { role: 'assistant', text: 'Done.', toolUses: [] },
-    ];
-    const host = {
-      env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
-      settings: { read: async () => ({}) },
-      clock: { sleep: () => new Promise<void>(() => {}) },
-      ui: { log: () => {}, toast: () => {} },
-      session: { usage: async () => ({ context: {} }) },
-      http: {
-        fetch: async (_url: string, init: { body: string }) => {
-          bodies.push(init.body);
-          const { questions } = JSON.parse(init.body) as { questions: Record<string, unknown> };
-          const answers = Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul', noul: 0.1 }]));
-          return { status: 200, ok: true, text: JSON.stringify({ answers }) };
-        },
-      },
-    };
-    await hooks['session.compact']!(host, { trigger: 'manual', messages, instructions: 'the error codes' }, async () => ({}));
+    const hooks = registered({ preserveRecentMessages: 1 });
+    const messages = readSession('Fix it.');
+    await hooks['session.compact']!(jevHost(0.1, undefined, bodies), { trigger: 'manual', messages, instructions: 'the error codes' }, async () => ({}));
     expect(bodies).toHaveLength(1);
     expect(JSON.parse(bodies[0]!).state.goal).toContain('The user asked this compaction to keep: the error codes');
   });
 
   it('folds hidden content from the API view back into the returned rows', async () => {
-    const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
-    (register as unknown as (on: unknown, options: unknown) => void)(
-      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
-      { preserveRecentMessages: 1, minReductionRatio: 0, targetPercent: 100, keepMode: 'threshold' },
-    );
-    const body = 'line\n'.repeat(200);
-    const messages = [
-      { role: 'user', text: 'Use the skill.', toolUses: [], handle: 'h0' },
-      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 's', tool: 'Skill', input: {} }], handle: 'h1' },
-      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 's', text: 'Launching skill: x', isError: false }], handle: 'h2' },
-      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Read', input: { file_path: 'a.ts' }, text: body }], handle: 'h3' },
-      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: body, isError: false }], handle: 'h4' },
-      { role: 'assistant', text: 'Done.', toolUses: [], handle: 'h5' },
-    ];
+    const hooks = registered({ preserveRecentMessages: 1, minReductionRatio: 0, targetPercent: 100, keepMode: 'threshold' });
+    const [, read, result, done] = readSession();
+    const skill = skillSession('SKILL BODY');
+    const messages = [...skill.rows, read, result, done].map((message, i) => ({ ...message, handle: `h${i}` }));
     const api = [
-      { role: 'user', content: [{ type: 'text', text: 'Use the skill.' }] },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 's' }] },
-      {
-        role: 'user',
-        content: [
-          { type: 'tool_result', tool_use_id: 's', content: 'Launching skill: x' },
-          { type: 'text', text: 'SKILL BODY' },
-        ],
-      },
+      ...skill.api,
       { role: 'assistant', content: [{ type: 'tool_use', id: 'a' }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: body }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: BODY }] },
       { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
     ];
-    const host = {
-      env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
-      settings: { read: async () => ({}) },
-      clock: { sleep: () => new Promise<void>(() => {}) },
-      ui: { log: () => {}, toast: () => {} },
-      session: { usage: async () => ({ context: {} }), messages: async () => api },
-      http: {
-        fetch: async (_url: string, init: { body: string }) => {
-          const { questions } = JSON.parse(init.body) as { questions: Record<string, unknown> };
-          const answers = Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul', noul: 0.01 }]));
-          return { status: 200, ok: true, text: JSON.stringify({ answers }) };
-        },
-      },
-    };
-    const out = (await hooks['session.compact']!(host, { trigger: 'manual', messages }, async () => ({}))) as {
+    const out = (await hooks['session.compact']!(jevHost(0.01, api), { trigger: 'manual', messages }, async () => ({}))) as {
       messages: { text: string; toolResults?: { tool_use_id: string; text: string }[]; handle?: string }[];
     };
-    const skill = out.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 's')!;
-    expect(skill.text).toMatch(/\n\nSKILL BODY$/);
+    const skillResult = out.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 's')!;
+    expect(skillResult.text).toMatch(/\n\nSKILL BODY$/);
     expect(out.messages.every((m) => m.handle === undefined)).toBe(true);
   });
 
   it('measures the size guards after the fold', async () => {
-    const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
-    (register as unknown as (on: unknown, options: unknown) => void)(
-      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
-      { preserveRecentMessages: 1, minReductionRatio: 0 },
-    );
-    const messages = [
-      { role: 'user', text: 'go', toolUses: [] },
-      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 's', tool: 'Skill', input: {} }] },
-      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 's', text: 'Launching skill: x', isError: false }] },
-      { role: 'assistant', text: 'Done.', toolUses: [] },
-    ];
+    const hooks = registered({ preserveRecentMessages: 1, minReductionRatio: 0 });
+    const skill = skillSession('BODY');
+    const messages = [...skill.rows, { role: 'assistant', text: 'Done.', toolUses: [] }];
     const api = [
-      { role: 'user', content: [{ type: 'text', text: 'go' }] },
-      { role: 'assistant', content: [{ type: 'tool_use', id: 's' }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 's', content: 'Launching skill: x' }, { type: 'text', text: 'BODY' }] },
+      ...skill.api,
       { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
     ];
-    const host = {
-      env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
-      settings: { read: async () => ({}) },
-      clock: { sleep: () => new Promise<void>(() => {}) },
-      ui: { log: () => {}, toast: () => {} },
-      session: { usage: async () => ({ context: {} }), messages: async () => api },
-      http: {
-        fetch: async (_url: string, init: { body: string }) => {
-          const { questions } = JSON.parse(init.body) as { questions: Record<string, unknown> };
-          const answers = Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul', noul: 0.99 }]));
-          return { status: 200, ok: true, text: JSON.stringify({ answers }) };
-        },
-      },
-    };
     // Jev keeps everything (0% before the fold); the folded body makes it negative.
-    const out = await hooks['session.compact']!(host, { trigger: 'manual', messages }, async () => ({}));
+    const out = await hooks['session.compact']!(jevHost(0.99, api), { trigger: 'manual', messages }, async () => ({}));
     expect(out).toEqual({ skip: expect.stringMatching(/below 0% minimum: -\d+% reduction.*hidden content: 1 folded back \(\d+ chars\)/) });
   });
 
   it('logs a plugin-triggered compaction that ran out of time', async () => {
     const files = new Map<string, string>();
     const { $ } = fsHost(files, { HOME: '/home/me', TYPESAFE_API_KEY: 'k' });
-    const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
-    (register as unknown as (on: unknown, options: unknown) => void)(
-      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
-      { preserveRecentMessages: 1 },
-    );
-    const body = 'line\n'.repeat(200);
-    const messages = [
-      { role: 'user', text: 'go', toolUses: [] },
-      { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'a', tool: 'Read', input: {} }] },
-      { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'a', text: body, isError: false }] },
-      { role: 'assistant', text: 'Done.', toolUses: [] },
-    ];
+    const hooks = registered({ preserveRecentMessages: 1 });
+    const messages = readSession();
     const host = {
       ...$,
       settings: { read: async () => ({}) },
