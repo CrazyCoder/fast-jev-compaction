@@ -21,7 +21,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npx vitest run
+      - name: Duplicate code gate (jscpd)
+        run: npx vitest run tests/jscpd.test.ts
+      - run: npx vitest run --exclude tests/jscpd.test.ts
       - run: npm run check:version
       - name: Require a version bump for shipped changes
         if: github.event_name == 'pull_request'
