@@ -14,16 +14,13 @@ import { redactDeep } from '../src/redact.js';
 import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
 import { dropTransientReminders, foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
 import { DECISIONS_MODEL, wireFor, type JevProvider } from '../src/decisions.js';
-import { pruneArchives } from '../src/recall/archive.js';
 import {
-  answerRecall,
-  archiveSession,
   RECALL_DESCRIPTION,
   RECALL_INPUT_SCHEMA,
-  RECALL_MAX_AGE_MS,
   RECALL_NAME,
+  recallCommand,
   recallRequest,
-} from '../src/recall/tool.js';
+} from '../src/recall/tool.ts';
 import type { ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
@@ -87,7 +84,7 @@ export type HookConfig = CompactOptions & {
   model: string;
   compactionTimeoutMs: number;
   builtinFallback: BuiltinFallback;
-  /** Archive what each compaction receives and offer the recall tool (default true). */
+  /** Offer the recall tool, and point cut notes at it (default true). */
   recall: boolean;
   /** Model alias or id `oldProse: 'summarize'` writes its summary with, through the session's own client. */
   proseModel: string;
@@ -601,63 +598,49 @@ export function isHeadlessRefusal(error: unknown): boolean {
   return error instanceof Error && error.message.includes('not available in a headless');
 }
 
-type RecallHost = LogHost & {
-  fs: { list: (path: string) => Promise<readonly { name: string; kind: string; size: number; mtimeMs: number }[]> };
-  session: { id: () => Promise<string> };
+/** How long one recall answer may take; the first one may download Node. */
+const RECALL_TIMEOUT_MS = 120_000;
+
+type RecallHost = {
+  plugin: { root: string };
+  process: {
+    run: (
+      argv: readonly string[],
+      init?: { cwd?: string; stdin?: string; timeoutMs?: number },
+    ) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  };
 };
 
-/** The `$.fs` calls the recall archive makes. */
-function recallFs($: RecallHost) {
-  return {
-    list: (path: string) => $.fs.list(path),
-    read: (path: string) => $.fs.read(path),
-    write: (path: string, text: string) => $.fs.write(path, text),
-  };
-}
-
-/**
- * Saves the rows a compaction received for the recall tool, before anything is
- * cut. Returns whether they are in the archive; never throws.
- */
-async function archiveForRecall($: RecallHost, rows: readonly SessionMessage[]): Promise<boolean> {
-  try {
-    const base = await configDir($);
-    if (!base) return false;
-    const saved = await archiveSession(recallFs($), base, await $.session.id(), rows);
-    if (saved.rows > 0) debugLog($, `recall: archived ${saved.rows} row(s) in ${saved.files} file(s)`);
-    return true;
-  } catch (error) {
-    debugLog($, `recall: archive not written (${error instanceof Error ? error.message : String(error)})`);
-    return false;
-  }
+/** Runs src/recall/cli.ts under the pinned Node of tools/node.cmd, `input` on stdin. */
+async function runRecallCli($: RecallHost, input: string, timeoutMs = RECALL_TIMEOUT_MS) {
+  const { argv, cwd } = recallCommand($.plugin.root);
+  return $.process.run(argv, { ...(cwd && { cwd }), stdin: input, timeoutMs });
 }
 
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
   let compacting = false;
   let retryAtPercent = 0;
-  // Old archives are emptied with recall off too: turning it off must not keep them for good.
-  on('session.start', async ($, event, next) => {
-    const started = await next(event);
-    try {
-      if (configured.recall) {
-        await $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA });
-      }
-      const base = await configDir($);
-      const current = await $.session.id();
-      if (base) void pruneArchives(recallFs($), base, Date.now(), RECALL_MAX_AGE_MS, current).catch(() => undefined);
-    } catch (error) {
-      debugLog($, `recall: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return started;
-  });
+  let nodeWarmed = false;
   if (configured.recall) {
+    on('session.start', async ($, event, next) => {
+      const started = await next(event);
+      try {
+        await $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA });
+      } catch (error) {
+        debugLog($, `recall: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return started;
+    });
     // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
     on('tool.call', { tool: 'mcp__fast-jev-compaction__recall' }, async ($, e) => {
       try {
-        const live = await $.session.messages();
+        const base = await configDir($);
+        if (!base) return { result: 'Recall failed: no config dir (CLAUDE_CONFIG_DIR, HOME or USERPROFILE).' };
         const request = recallRequest(e as Record<string, unknown>);
-        return { result: await answerRecall(recallFs($), await configDir($), await $.session.id(), live, request) };
+        const run = await runRecallCli($, JSON.stringify({ configDir: base, sessionId: await $.session.id(), request }));
+        if (run.exitCode !== 0) return { result: `Recall failed: ${(run.stderr || run.stdout).trim().slice(0, 500)}` };
+        return { result: run.stdout };
       } catch (error) {
         return { result: `Recall failed: ${error instanceof Error ? error.message : String(error)}` };
       }
@@ -669,9 +652,14 @@ export const register: Register = (on: On, options: PluginOptions) => {
     if (event.trigger === 'precompute') {
       return { skip: 'fast-jev-compaction does not handle speculative compactions' };
     }
-    // What this compaction may cut stays reachable through the recall tool;
-    // cut notes point there only when the archive holds it.
-    const archived = configured.recall && (await archiveForRecall($, event.messages));
+    // Cut notes point at the recall tool from now on: have its Node downloaded
+    // before the first call, without holding up the compaction.
+    if (configured.recall && !nodeWarmed) {
+      nodeWarmed = true;
+      void runRecallCli($, '').catch((error: unknown) =>
+        debugLog($, `recall: Node not ready (${error instanceof Error ? error.message : String(error)})`),
+      );
+    }
 
     const giveUp = async (why: string) => {
       if (mayUseBuiltin(event.trigger, configured.builtinFallback)) {
@@ -686,7 +674,6 @@ export const register: Register = (on: On, options: PluginOptions) => {
       // `/compact <instructions>`: what the user wants kept, for Jev's goal.
       const config = {
         ...configured,
-        recall: archived,
         apiKey: await getApiKey($, configured),
         instructions: event.instructions,
       };

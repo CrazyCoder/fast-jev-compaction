@@ -1,48 +1,90 @@
 import { describe, expect, it } from 'vitest';
-import { entriesFromGroups } from '../src/recall/transcript.js';
-import { callRow, resultRow, userRow } from './helpers/rows.js';
+import { readTranscript } from '../src/recall/transcript.ts';
+
+type Block = Record<string, unknown>;
+const row = (type: string, content: string | Block[], extra: Block = {}) =>
+  JSON.stringify({ type, message: { role: type, content }, ...extra });
+const prompt = (text: string) => row('user', text);
+const reply = (text: string) => row('assistant', [{ type: 'text', text }]);
+const call = (id: string, input: Block = { file_path: `${id}.ts` }) =>
+  row('assistant', [{ type: 'tool_use', id, name: 'Read', input }]);
+const result = (id: string, content: string | Block[], extra: Block = {}) =>
+  row('user', [{ type: 'tool_result', tool_use_id: id, content, ...extra }]);
+const boundary = () => JSON.stringify({ type: 'system', subtype: 'compact_boundary' });
 
 const FULL = 'line\n'.repeat(50);
-const SAVED = 'C:\\Users\\me\\.claude\\projects\\p\\s\\tool-results\\abc.txt';
-const user = userRow;
-const result = resultRow;
-const assistant = (text: string, id: string) => callRow(id, text, { file_path: `${id}.ts` });
-const reply = (text: string) => ({ role: 'assistant' as const, text, toolUses: [] });
-const shape = (groups: Parameters<typeof entriesFromGroups>[0]) =>
-  entriesFromGroups(groups).map((e) => [e.n, e.kind, e.kind === 'call' ? e.id : e.text]);
+const CUT = 'line\n[fast-jev-compaction truncated 245 chars of this tool result; full text: recall expand ["t1"]]';
 
-describe('entriesFromGroups', () => {
-  it('reads archived rows, then live rows, keeping the first result and counting a copied prompt once', () => {
-    const archived = [user('go'), assistant('Reading.', 't1'), result('t1', FULL)];
-    const live = [user('go'), assistant('Reading.', 't1'), result('t1', 'line\n[fast-jev-compaction truncated]'), user('next')];
-    expect(shape([archived, live])).toEqual([
-      [1, 'prompt', 'go'],
-      [2, 'reply', 'Reading.'],
-      [3, 'call', 't1'],
-      [4, 'prompt', 'next'],
-    ]);
-    expect(entriesFromGroups([archived, live])[2]).toMatchObject({ result: FULL, input: { file_path: 't1.ts' } });
-  });
-
-  it('keeps a short prompt or reply said again later, after other work', () => {
-    const first = [user('yes'), reply('Done.')];
-    const later = [user('yes'), reply('Done.'), assistant('', 't1'), result('t1', 'ok'), user('yes'), reply('Done.')];
-    expect(shape([first, later])).toEqual([
-      [1, 'prompt', 'yes'],
-      [2, 'reply', 'Done.'],
-      [3, 'call', 't1'],
-      [4, 'prompt', 'yes'],
-      [5, 'reply', 'Done.'],
+describe('readTranscript', () => {
+  it('reads prompts, replies and calls with their results in order', () => {
+    const entries = readTranscript(
+      [prompt('Fix the bug.'), call('t1'), result('t1', FULL), reply('Fixed.'), row('attachment', 'x')].join('\n'),
+    );
+    expect(entries).toEqual([
+      { n: 1, kind: 'prompt', text: 'Fix the bug.' },
+      { n: 2, kind: 'call', id: 't1', tool: 'Read', input: { file_path: 't1.ts' }, result: FULL },
+      { n: 3, kind: 'reply', text: 'Fixed.' },
     ]);
   });
 
-  it('finds where a large output was saved', () => {
-    const rows = [assistant('', 't2'), result('t2', `Output too large. Full output saved to: ${SAVED}\n\nPreview`)];
-    expect(entriesFromGroups([rows])[0]).toMatchObject({ kind: 'call', savedTo: SAVED });
+  it('skips the copies a compaction writes after its boundary and keeps the uncut result', () => {
+    const entries = readTranscript(
+      [
+        prompt('Fix the bug.'),
+        call('t1'),
+        result('t1', FULL),
+        reply('Done.'),
+        boundary(),
+        row('user', 'This session is being continued from a previous conversation.', { isCompactSummary: true }),
+        prompt('Fix the bug.'),
+        call('t1'),
+        result('t1', CUT),
+        reply('Done.'),
+        prompt('yes'),
+        reply('Done.'),
+      ].join('\n'),
+    );
+    expect(entries.map((e) => (e.kind === 'call' ? `call ${e.id}` : `${e.kind} ${e.text}`))).toEqual([
+      'prompt Fix the bug.',
+      'call t1',
+      'reply Done.',
+      'prompt yes',
+      'reply Done.',
+    ]);
+    expect(entries[1]).toMatchObject({ result: FULL });
   });
 
-  it('leaves out the reminders the host adds to a prompt or result', () => {
-    const rows = [user('Now c.ts.\n\n<system-reminder>\nContents of c.ts\n</system-reminder>')];
-    expect(shape([rows])).toEqual([[1, 'prompt', 'Now c.ts.']]);
+  it('keeps a short prompt said again later, after other work', () => {
+    const entries = readTranscript(
+      [prompt('yes'), reply('ok'), call('t1'), result('t1', 'x'), prompt('yes'), reply('ok')].join('\n'),
+    );
+    expect(entries.filter((e) => e.kind === 'prompt')).toHaveLength(2);
+  });
+
+  it('drops host reminders, meta and sidechain rows, and notes where a large output was saved', () => {
+    const saved = 'Output too large (32.4KB). Full output saved to: /cfg/projects/p/s/tool-results/a.txt\n\nPreview…';
+    const entries = readTranscript(
+      [
+        prompt('Look.\n\n<system-reminder>\nConcise output style is active.\n</system-reminder>'),
+        row('user', 'skill body', { isMeta: true }),
+        row('assistant', [{ type: 'text', text: 'subagent' }], { isSidechain: true }),
+        call('t2'),
+        result('t2', [{ type: 'text', text: saved }], { is_error: true }),
+        'not json',
+      ].join('\n'),
+    );
+    expect(entries).toEqual([
+      { n: 1, kind: 'prompt', text: 'Look.' },
+      {
+        n: 2,
+        kind: 'call',
+        id: 't2',
+        tool: 'Read',
+        input: { file_path: 't2.ts' },
+        result: saved,
+        isError: true,
+        savedTo: '/cfg/projects/p/s/tool-results/a.txt',
+      },
+    ]);
   });
 });

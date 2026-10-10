@@ -1,21 +1,17 @@
-import type { Message } from '../types.js';
-import { archiveDir, archiveRows, loadArchive, type ArchiveFs } from './archive.js';
-import { RECALL_TOOL, resolveRefs, runRecall, type RecallRequest } from './recall.js';
-import { entriesFromGroups } from './transcript.js';
+import { RECALL_TOOL, type RecallRequest } from './recall.ts';
 
 export { RECALL_TOOL };
 
 /**
  * The recall tool as the plugin offers it: its name, description and input
- * schema, the request its calls carry, and the answer from a session's
- * archive and live rows. Host calls stay in the hook; this takes plain values.
+ * schema, the request its calls carry, and the command that answers it. The
+ * answer comes from src/recall/cli.ts, run by the pinned Node of
+ * tools/node.cmd, which reads the session transcript at any size; host calls
+ * stay in the hook.
  */
 
 /** The short name `$.tool.register` takes; the model calls RECALL_TOOL. */
 export const RECALL_NAME = 'recall';
-
-/** Archives of sessions untouched this long are emptied. */
-export const RECALL_MAX_AGE_MS = 30 * 86_400_000;
 
 export const RECALL_DESCRIPTION = [
   'Recall earlier parts of this session, including the tool calls and results that compaction cut or dropped.',
@@ -74,27 +70,20 @@ export function isSavedOutput(path: string, configDir: string): boolean {
   );
 }
 
-/** Answers a recall call from a session's archive under `configDir` and its live rows. */
-export async function answerRecall(
-  fs: ArchiveFs,
-  configDir: string | undefined,
-  sessionId: string,
-  live: readonly Message[],
-  request: RecallRequest,
-): Promise<string> {
-  const archived = configDir ? await loadArchive(fs, archiveDir(configDir, sessionId)) : [];
-  const entries = entriesFromGroups([...archived, live]);
-  // Outputs Claude Code saved to a file, for the entries asked for in full.
-  const saved = new Map<string, string>();
-  for (const entry of resolveRefs(entries, request.expand ?? []).found) {
-    if (entry.kind !== 'call' || !entry.savedTo || !configDir || !isSavedOutput(entry.savedTo, configDir)) continue;
-    const text = await fs.read(entry.savedTo).catch(() => undefined);
-    if (text !== undefined) saved.set(entry.savedTo, text);
+/**
+ * How to run src/recall/cli.ts under tools/node.cmd from the plugin folder
+ * `root`: through bash on Linux and macOS; on Windows through cmd.exe with
+ * the tools folder as the working directory, since cmd.exe /s cannot take a
+ * quoted command path and `root` can hold a space. The request goes on stdin.
+ */
+export function recallCommand(root: string): { argv: string[]; cwd?: string } {
+  if (/^[A-Za-z]:[\\/]/.test(root) || root.startsWith('\\\\')) {
+    const base = root.replace(/[\\/]+$/, '');
+    return {
+      argv: ['cmd.exe', '/d', '/s', '/c', '.\\node.cmd', `${base}\\src\\recall\\cli.ts`],
+      cwd: `${base}\\tools`,
+    };
   }
-  return runRecall(entries, request, { readFile: (path) => saved.get(path) });
-}
-
-/** Saves the rows a compaction received in the session's archive. */
-export function archiveSession(fs: ArchiveFs, configDir: string, sessionId: string, rows: readonly Message[]) {
-  return archiveRows(fs, archiveDir(configDir, sessionId), rows);
+  const base = root.replace(/\/+$/, '');
+  return { argv: ['bash', `${base}/tools/node.cmd`, `${base}/src/recall/cli.ts`] };
 }

@@ -1,10 +1,15 @@
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { register } from '../hooks/fast-jev.ts';
-import { RECALL_TOOL, recallRequest } from '../src/recall/tool.js';
-import { memoryFs } from './helpers/memory-fs.js';
+import { RECALL_TOOL, recallRequest } from '../src/recall/tool.ts';
 import { callRow, resultRow, userRow } from './helpers/rows.js';
 
 type Hook = (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>;
+type Run = { argv: readonly string[]; init?: { cwd?: string; stdin?: string; timeoutMs?: number } };
 
 /** Registered hooks by event, and for `tool.call` by the tool its filter names. */
 function hooks(options: Record<string, unknown> = {}) {
@@ -18,10 +23,8 @@ function hooks(options: Record<string, unknown> = {}) {
   return registered;
 }
 
-const ROOT = '/home/me/.claude/fast-jev-compaction/recall/sess-1';
+const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '');
 const BODY = 'export const x = 1;\n'.repeat(400);
-
-const failing = async () => ({ status: 500, ok: false, text: 'down' });
 
 /** Jev answering every question with 0.01: every result is cut. */
 const cutAll = async (_url: string, init: { body: string }) => {
@@ -30,118 +33,112 @@ const cutAll = async (_url: string, init: { body: string }) => {
   return { status: 200, ok: true, text: JSON.stringify({ answers }) };
 };
 
-function host(live: unknown[] = [], fetch: typeof failing | typeof cutAll = failing) {
-  const { fs, files } = memoryFs();
-  const register = vi.fn(async (spec: { name: string }) => ({ tool: `mcp__fast-jev-compaction__${spec.name}` }));
+/** Runs src/recall/cli.ts with this Node, as tools/node.cmd would with the pinned one. */
+const realCli = async (argv: readonly string[], init?: Run['init']) => {
+  const run = spawnSync(process.execPath, [argv.at(-1)!], { input: init?.stdin ?? '', encoding: 'utf8' });
+  return { exitCode: run.status ?? 1, stdout: run.stdout, stderr: run.stderr };
+};
+
+function host(home: string, run: (argv: readonly string[], init?: Run['init']) => Promise<unknown> = realCli) {
+  const runs: Run[] = [];
+  const toolRegister = vi.fn(async (spec: { name: string }) => ({ tool: `mcp__fast-jev-compaction__${spec.name}` }));
   const $ = {
-    env: { get: async (name: string) => ({ HOME: '/home/me', TYPESAFE_API_KEY: 'k' })[name] },
-    fs,
+    env: { get: async (name: string) => ({ HOME: home, TYPESAFE_API_KEY: 'k' })[name] },
+    fs: { exists: async () => false, read: async () => '', write: async () => {} },
     settings: { read: async () => ({}) },
     clock: { sleep: () => new Promise<void>(() => {}) },
     ui: { log: () => {}, toast: () => {} },
-    tool: { register },
-    session: { id: async () => 'sess-1', messages: async (args?: unknown) => (args ? [] : live), usage: async () => ({ context: {} }) },
-    http: { fetch },
+    tool: { register: toolRegister },
+    plugin: { root: ROOT },
+    process: {
+      run: async (argv: readonly string[], init?: Run['init']) => {
+        runs.push({ argv, ...(init && { init }) });
+        return run(argv, init);
+      },
+    },
+    session: { id: async () => 'sess-1', messages: async () => [], usage: async () => ({ context: {} }) },
+    http: { fetch: cutAll },
   };
-  return { $, files, register };
+  return { $, runs, toolRegister };
 }
 
-const transcript = () => [
+/** A home whose ~/.claude holds session sess-1's transcript. */
+function homeWithTranscript(): string {
+  const home = mkdtempSync(join(tmpdir(), 'recall-hook-'));
+  const project = join(home, '.claude', 'projects', 'C--work-app');
+  mkdirSync(project, { recursive: true });
+  const rows = [
+    { type: 'user', message: { content: 'Find why the build fails.' } },
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_build', name: 'Bash', input: { command: 'npm run build' } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_build', content: `error TS2304: Cannot find name 'widget'\n${BODY}` }] } },
+    { type: 'user', message: { content: 'Next, fix it.' } },
+  ];
+  writeFileSync(join(project, 'sess-1.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n'));
+  return home;
+}
+
+const rows = () => [
   userRow('Find why the build fails.'),
   callRow('toolu_build', '', { command: 'npm run build' }),
   resultRow('toolu_build', `error TS2304: Cannot find name 'widget'\n${BODY}`),
+  userRow('ok'),
+  { role: 'assistant', text: 'Done.', toolUses: [] },
 ];
 
 describe('recall in the hook', () => {
   it('registers the recall tool when a session starts', async () => {
-    const { $, register } = host();
+    const { $, toolRegister } = host('/home/me');
     await hooks()['session.start']!($, {}, async () => ({ cwd: '.' }));
-    expect(register).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall' }));
+    expect(toolRegister).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall' }));
   });
 
-  it('archives what a compaction receives before anything is cut, even when Jev fails', async () => {
-    const { $, files } = host();
-    await hooks()['session.compact']!($, { trigger: 'manual', messages: transcript() }, async () => ({}));
-    const chunks = [...files.keys()].filter((k) => k.startsWith(`${ROOT}/`));
-    expect(chunks).toEqual([`${ROOT}/000001-001.json`]);
-    expect(files.get(chunks[0]!)!.text).toContain("Cannot find name 'widget'");
-  });
-
-  it('answers a recall call from the archive and the live rows', async () => {
-    const { $ } = host([userRow('Next, fix it.')]);
-    const registered = hooks();
-    await registered['session.compact']!($, { trigger: 'manual', messages: transcript() }, async () => ({}));
-    const call = registered[`tool.call:${RECALL_TOOL}`]!;
+  it('answers a call by running the recall script on the session transcript', async () => {
+    const home = homeWithTranscript();
+    const { $, runs } = host(home);
+    const call = hooks()[`tool.call:${RECALL_TOOL}`]!;
     const found = (await call($, { tool: RECALL_TOOL, query: 'widget' }, async () => ({}))) as { result: string };
-    expect(found.result).toMatch(/^#2 call Read \(toolu_build\)/m);
+    expect(found.result).toMatch(/^#2 call Bash \(toolu_build\)/m);
     const full = (await call($, { tool: RECALL_TOOL, expand: ['toolu_build'] }, async () => ({}))) as { result: string };
     expect(full.result).toContain(BODY.slice(0, 200));
-    const listed = (await call($, { tool: RECALL_TOOL, range: [1, 9] }, async () => ({}))) as { result: string };
-    expect(listed.result).toContain('#3 prompt Next, fix it.');
+    expect(JSON.parse(runs[0]!.init!.stdin!)).toEqual({
+      configDir: `${home.replace(/\\/g, '/')}/.claude`,
+      sessionId: 'sess-1',
+      request: { query: 'widget' },
+    });
+    expect(runs[0]!.argv.at(-1)).toMatch(/src[\\/]recall[\\/]cli\.ts$/);
   });
 
-  it('reads a saved output only from Claude Code\'s own tool-results folders', async () => {
-    const saved = '/home/me/.claude/projects/p/sess-1/tool-results/abc.txt';
-    const rows = (path: string) => [
-      callRow('toolu_s', '', { command: 'gh api' }),
-      resultRow('toolu_s', `Output too large. Full output saved to: ${path}\n\nPreview`),
-    ];
-    for (const [path, readable] of [
-      [saved, true],
-      ['/home/me/.ssh/id_rsa', false],
-      ['/home/me/.claude/projects/p/sess-1/tool-results/../../../../.ssh/id_rsa', false],
-    ] as const) {
-      const { $, files } = host(rows(path));
-      files.set(path, { text: 'FILE CONTENT', mtimeMs: 0 });
-      const out = (await hooks()[`tool.call:${RECALL_TOOL}`]!($, { tool: RECALL_TOOL, expand: ['toolu_s'] }, async () => ({}))) as {
-        result: string;
-      };
-      expect(out.result.includes('FILE CONTENT'), path).toBe(readable);
-    }
-  });
-
-  /** The build result's text after a compaction in which Jev cuts every result. */
-  async function cutResult($: ReturnType<typeof host>['$']): Promise<string> {
-    const rows = [...transcript(), userRow('ok'), { role: 'assistant', text: 'Done.', toolUses: [] }];
-    const out = (await hooks({ preserveRecentMessages: 1, keepMode: 'threshold' })['session.compact']!(
-      $,
-      { trigger: 'manual', messages: rows },
-      async () => ({}),
-    )) as { messages: { toolResults?: { text: string }[] }[] };
-    return out.messages.flatMap((m) => m.toolResults ?? [])[0]!.text;
-  }
-
-  it('writes cut notes that name the recall call', async () => {
-    expect(await cutResult(host([], cutAll).$)).toMatch(/; full text: recall expand \["toolu_build"\]\]$/);
-  });
-
-  it('tells the model to run the tool again when the archive could not be written', async () => {
-    const { $ } = host([], cutAll);
-    $.fs.write = async () => {
-      throw new Error('EACCES');
+  it('reports a script that fails', async () => {
+    const { $ } = host('/home/me', async () => ({ exitCode: 1, stdout: '', stderr: 'ERROR: download failed\n' }));
+    const out = (await hooks()[`tool.call:${RECALL_TOOL}`]!($, { tool: RECALL_TOOL, query: 'x' }, async () => ({}))) as {
+      result: string;
     };
-    expect(await cutResult($)).toMatch(/; re-run the tool if needed\]$/);
+    expect(out.result).toBe('Recall failed: ERROR: download failed');
   });
 
-  it('empties old archives at session start, the current session\'s and recall: false aside', async () => {
-    for (const recall of [true, false]) {
-      const { $, files } = host();
-      const old = (id: string) => `/home/me/.claude/fast-jev-compaction/recall/${id}/000001-001.json`;
-      files.set(old('sess-1'), { text: '[]', mtimeMs: 0 });
-      files.set(old('other'), { text: '[]', mtimeMs: 0 });
-      await hooks({ recall })['session.start']!($, {}, async () => ({ cwd: '.' }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect([files.get(old('sess-1'))!.text, files.get(old('other'))!.text], `recall: ${recall}`).toEqual(['[]', '']);
+  it('writes cut notes that name the recall call, and has Node fetched once', async () => {
+    const { $, runs } = host('/home/me', async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const registered = hooks({ preserveRecentMessages: 1, keepMode: 'threshold' });
+    for (let i = 0; i < 2; i++) {
+      const out = (await registered['session.compact']!($, { trigger: 'manual', messages: rows() }, async () => ({}))) as {
+        messages: { toolResults?: { text: string }[] }[];
+      };
+      expect(out.messages.flatMap((m) => m.toolResults ?? [])[0]!.text).toMatch(/; full text: recall expand \["toolu_build"\]\]$/);
     }
+    expect(runs.map((r) => r.init?.stdin)).toEqual(['']);
   });
 
   it('does nothing with recall: false', async () => {
-    const { $, files, register } = host();
-    const registered = hooks({ recall: false });
+    const { $, runs, toolRegister } = host('/home/me');
+    const registered = hooks({ recall: false, preserveRecentMessages: 1, keepMode: 'threshold' });
     expect(registered[`tool.call:${RECALL_TOOL}`]).toBeUndefined();
-    await registered['session.compact']!($, { trigger: 'manual', messages: transcript() }, async () => ({}));
-    expect([...files.keys()].some((k) => k.includes('/recall/'))).toBe(false);
-    expect(register).not.toHaveBeenCalled();
+    expect(registered['session.start']).toBeUndefined();
+    const out = (await registered['session.compact']!($, { trigger: 'manual', messages: rows() }, async () => ({}))) as {
+      messages: { toolResults?: { text: string }[] }[];
+    };
+    expect(out.messages.flatMap((m) => m.toolResults ?? [])[0]!.text).toMatch(/; re-run the tool if needed\]$/);
+    expect(runs).toEqual([]);
+    expect(toolRegister).not.toHaveBeenCalled();
   });
 });
 

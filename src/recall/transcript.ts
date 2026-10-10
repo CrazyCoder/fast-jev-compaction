@@ -1,16 +1,15 @@
-import type { Message } from '../types.js';
-
 /**
  * The entries recall searches: the user's prompts, the assistant's replies and
- * each tool call with its result, numbered in order, read from groups of
- * session rows (the archive's groups, then the live rows).
+ * each tool call with its result, numbered in order, read from a session
+ * transcript (`<config>/projects/<project>/<session>.jsonl`).
  *
- * Each group starts at the beginning of the conversation as its compaction saw
- * it, so a kept message appears again in a later group. A tool call keeps the
- * first result read for its id (the uncut one). A prompt or reply counts once
- * per position: it is the same entry when the same text follows the same
- * entry, so a kept copy is skipped while the same words said again after other
- * work are not.
+ * A compaction keeps the transcript and appends a `compact_boundary` row, then
+ * writes the messages it kept again, so the history after a boundary starts
+ * with copies. A tool call keeps the first result read for its id (the uncut
+ * one). A prompt or reply counts once per position: it is the same entry when
+ * the same text follows the same entry within a stretch between boundaries, so
+ * a kept copy is skipped while the same words said again after other work are
+ * not.
  */
 
 export type Entry =
@@ -29,6 +28,15 @@ export type Entry =
     };
 
 type Call = Extract<Entry, { kind: 'call' }>;
+type Block = { type?: string; [field: string]: unknown };
+type Row = {
+  type?: string;
+  subtype?: string;
+  isMeta?: boolean;
+  isSidechain?: boolean;
+  isCompactSummary?: boolean;
+  message?: { content?: unknown };
+};
 
 const SAVED_TO = /Full output saved to: (.+?)\r?\n/;
 const REMINDER = /\s*<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/g;
@@ -38,7 +46,18 @@ function withoutReminders(text: string): string {
   return text.replace(REMINDER, '');
 }
 
-export function entriesFromGroups(groups: readonly (readonly Message[])[]): Entry[] {
+/** The text of a message or tool result content: a string, or text blocks joined. */
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return (content as Block[])
+    .map((block) => (block.type === 'text' ? String(block['text'] ?? '') : block.type === 'image' ? '[image]' : ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Reads transcript lines one at a time; `entries` grows as they come. */
+export function transcriptReader(): { line: (raw: string) => void; entries: Entry[] } {
   const entries: Entry[] = [];
   const calls = new Map<string, Call>();
   /** Each prompt or reply seen, keyed by its text and the entry before it, to an id. */
@@ -59,36 +78,56 @@ export function entriesFromGroups(groups: readonly (readonly Message[])[]): Entr
     entries.push({ n: entries.length + 1, kind, text: body });
   };
 
-  for (const rows of groups) {
-    previous = '';
-    for (const row of rows) {
-      for (const result of row.toolResults ?? []) {
-        const call = calls.get(result.tool_use_id);
-        if (!call || call.result !== undefined) continue;
-        call.result = withoutReminders(result.text);
-        if (result.isError) call.isError = true;
-        const saved = SAVED_TO.exec(result.text)?.[1];
-        if (saved) call.savedTo = saved.trim();
-      }
-      if (row.role === 'user') {
-        text('prompt', row.text);
-        continue;
-      }
-      text('reply', row.text);
-      for (const use of row.toolUses) {
-        previous = `c${use.tool_use_id}`;
-        if (calls.has(use.tool_use_id)) continue;
-        const call: Call = {
-          n: entries.length + 1,
-          kind: 'call',
-          id: use.tool_use_id,
-          tool: use.tool,
-          input: (use.input as Record<string, unknown>) ?? {},
-        };
-        calls.set(use.tool_use_id, call);
-        entries.push(call);
-      }
+  const result = (id: string, raw: string, isError: boolean): void => {
+    const call = calls.get(id);
+    if (!call || call.result !== undefined) return;
+    call.result = withoutReminders(raw);
+    if (isError) call.isError = true;
+    const saved = SAVED_TO.exec(raw)?.[1];
+    if (saved) call.savedTo = saved.trim();
+  };
+
+  const toolUse = (id: string, tool: string, input: Record<string, unknown>): void => {
+    previous = `c${id}`;
+    if (calls.has(id)) return;
+    const call: Call = { n: entries.length + 1, kind: 'call', id, tool, input };
+    calls.set(id, call);
+    entries.push(call);
+  };
+
+  const line = (raw: string): void => {
+    let row: Row;
+    try {
+      row = JSON.parse(raw) as Row;
+    } catch {
+      return;
     }
-  }
-  return entries;
+    if (row.type === 'system' && row.subtype === 'compact_boundary') {
+      previous = '';
+      return;
+    }
+    if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isSidechain || row.isCompactSummary) return;
+    const content = row.message?.content;
+    const blocks: Block[] = Array.isArray(content) ? (content as Block[]) : [];
+    if (row.type === 'user') {
+      for (const block of blocks.filter((b) => b.type === 'tool_result')) {
+        result(String(block['tool_use_id']), textOf(block['content']), block['is_error'] === true);
+      }
+      text('prompt', typeof content === 'string' ? content : textOf(blocks.filter((b) => b.type === 'text')));
+      return;
+    }
+    text('reply', textOf(blocks.filter((b) => b.type === 'text')));
+    for (const block of blocks.filter((b) => b.type === 'tool_use')) {
+      toolUse(String(block['id']), String(block['name']), (block['input'] as Record<string, unknown>) ?? {});
+    }
+  };
+
+  return { line, entries };
+}
+
+/** Entries from a whole transcript's text. */
+export function readTranscript(jsonl: string): Entry[] {
+  const reader = transcriptReader();
+  for (const raw of jsonl.split('\n')) reader.line(raw);
+  return reader.entries;
 }

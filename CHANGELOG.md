@@ -9,14 +9,15 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
 
 ### Added
 
-- `recall` (default on): each compaction first archives the rows it receives,
-  full tool results included, under
-  `<config dir>/fast-jev-compaction/recall/<session>/`, and the model gets a
-  `recall` tool (`mcp__fast-jev-compaction__recall`) with `query` (BM25 or
-  regex), `expand` (by `#N` or tool_use_id, saved large outputs included) and
-  `range`, in answers of at most 48k characters. Cut notes name the recall call
-  instead of "re-run the tool" (`recallNotes` in the library). Archives
-  untouched for 30 days are emptied, with recall on or off.
+- `recall` (default on): the model gets a `recall` tool
+  (`mcp__fast-jev-compaction__recall`) over the session transcript, with `query`
+  (BM25 or regex), `expand` (by `#N` or tool_use_id, the uncut result, saved
+  large outputs included) and `range`, in answers of at most 48k characters. Cut
+  notes name the recall call instead of "re-run the tool" (`recallNotes` in the
+  library).
+- `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
+  SHA-256 on first use, which runs the recall tool; CI checks the line endings
+  of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.
 - Each compaction outcome, and each `/compact` queued in a headless session, is
   appended as one line to
   `<CLAUDE_CONFIG_DIR or ~/.claude>/fast-jev-compaction/compactions.log` (newest

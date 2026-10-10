@@ -1,12 +1,12 @@
 /**
  * The recall tool's engine: search, expand and list a session's entries
- * (entriesFromGroups), within a fixed answer size.
+ * (src/recall/transcript.ts), within a fixed answer size.
  *
  * Adapted from pi-vcc (MIT, Copyright (c) 2026 sting8k): the BM25-lite ranking,
  * the stopwords and the regex mode. The answer budget and its per-entry share
  * follow pi-blackhole (MIT, Copyright (c) 2026 k0valik).
  */
-import type { Entry } from './transcript.js';
+import type { Entry } from './transcript.ts';
 
 /** The most one recall answer holds, in characters. */
 export const RECALL_MAX_CHARS = 48_000;
