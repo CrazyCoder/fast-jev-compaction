@@ -4,14 +4,14 @@
  * stdin, `{ configDir, sessionId, request }`, and the answer goes to stdout.
  * Node reads the transcript at any size, which a hook's `$.fs.read` cannot.
  */
-import { createReadStream, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { readEntries } from './files.ts';
 import { resolveRefs, runRecall, type RecallDeps, type RecallRequest } from './recall.ts';
 import { findSession, searchSessions } from './sessions.ts';
 import { isSavedOutput } from './tool.ts';
-import { transcriptReader, type Entry } from './transcript.ts';
+import type { Entry } from './transcript.ts';
 
 /** The request on stdin; `rg` names the ripgrep binary (tests point it at a missing one). */
 export type CliInput = { configDir: string; sessionId: string; request: RecallRequest; rg?: string };
@@ -43,13 +43,6 @@ function sessionAgents(sessionDir: string): Agent[] {
     });
   }
   return agents;
-}
-
-async function readEntries(file: string, sidechain = false): Promise<Entry[]> {
-  const reader = transcriptReader({ sidechain });
-  const lines = createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity });
-  for await (const line of lines) reader.line(line);
-  return reader.entries;
 }
 
 /** Each agent's entries, labelled with its name and numbered on from `after`. */
@@ -91,7 +84,9 @@ export async function answer({ configDir, sessionId, request, rg }: CliInput): P
   const file = /^[\w-]+$/.test(sessionId) ? findTranscript(configDir, sessionId) : undefined;
   if (!file) return 'Recall: no transcript found for this session.';
   const { sessions, project, session, ...rest } = request;
-  if (sessions?.trim()) return searchSessions(configDir, file, sessions.trim(), project, rest.page ?? 1, rg);
+  if (sessions?.trim()) {
+    return searchSessions(configDir, file, sessions.trim(), project, rest.page ?? 1, { ...(rg && { rg }) });
+  }
   if (session?.trim()) {
     const other = findSession(configDir, session.trim());
     if (!other) return `No session matches "${session.trim().slice(0, 60)}".`;
