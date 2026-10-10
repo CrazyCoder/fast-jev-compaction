@@ -80,6 +80,26 @@ describe('recall in the hook', () => {
     expect(listed.result).toContain('#3 prompt Next, fix it.');
   });
 
+  it('reads a saved output only from Claude Code\'s own tool-results folders', async () => {
+    const saved = '/home/me/.claude/projects/p/sess-1/tool-results/abc.txt';
+    const rows = (path: string) => [
+      callRow('toolu_s', '', { command: 'gh api' }),
+      resultRow('toolu_s', `Output too large. Full output saved to: ${path}\n\nPreview`),
+    ];
+    for (const [path, readable] of [
+      [saved, true],
+      ['/home/me/.ssh/id_rsa', false],
+      ['/home/me/.claude/projects/p/sess-1/tool-results/../../../../.ssh/id_rsa', false],
+    ] as const) {
+      const { $, files } = host(rows(path));
+      files.set(path, { text: 'FILE CONTENT', mtimeMs: 0 });
+      const out = (await hooks()[`tool.call:${RECALL_TOOL}`]!($, { tool: RECALL_TOOL, expand: ['toolu_s'] }, async () => ({}))) as {
+        result: string;
+      };
+      expect(out.result.includes('FILE CONTENT'), path).toBe(readable);
+    }
+  });
+
   it('writes cut notes that name the recall call', async () => {
     const { $ } = host([], cutAll);
     const rows = [...transcript(), userRow('ok'), { role: 'assistant', text: 'Done.', toolUses: [] }];

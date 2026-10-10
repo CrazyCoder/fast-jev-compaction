@@ -13,7 +13,7 @@ import type { Message } from '../types.js';
 
 /** The `$.fs` calls the archive uses. */
 export type ArchiveFs = {
-  list: (path: string) => Promise<readonly { name: string; kind: string; mtimeMs: number }[]>;
+  list: (path: string) => Promise<readonly { name: string; kind: string; size: number; mtimeMs: number }[]>;
   read: (path: string) => Promise<string>;
   write: (path: string, text: string) => Promise<void>;
 };
@@ -64,15 +64,30 @@ export async function loadArchive(fs: ArchiveFs, dir: string): Promise<Message[]
   return [...groups.values()];
 }
 
-/** The parts of a row recall reads, each text cut to fit one chunk. */
+/**
+ * The parts of a row recall reads, cut so the row fits one chunk: its text,
+ * each call's input and each result share the chunk evenly, with room for the
+ * JSON around them (escaping counted, as the share is of the JSON form).
+ */
 function slim(row: Message): Message {
-  const cut = (text: string) => (text.length <= ARCHIVE_CHUNK_CHARS / 2 ? text : text.slice(0, ARCHIVE_CHUNK_CHARS / 2));
+  const results = row.toolResults ?? [];
+  const share = Math.floor((ARCHIVE_CHUNK_CHARS * 0.9) / (1 + row.toolUses.length + results.length));
+  const cut = (text: string): string => {
+    if (JSON.stringify(text).length <= share) return text;
+    let head = text.slice(0, share);
+    while (head && JSON.stringify(head).length > share) head = head.slice(0, Math.floor(head.length * 0.9));
+    return head;
+  };
+  const input = (value: Record<string, unknown>): Record<string, unknown> => {
+    const json = JSON.stringify(value);
+    return json.length <= share ? value : { input_head: cut(json) };
+  };
   return {
     role: row.role,
     text: cut(row.text),
-    toolUses: row.toolUses.map(({ tool_use_id, tool, input }) => ({ tool_use_id, tool, input })),
+    toolUses: row.toolUses.map(({ tool_use_id, tool, input: value }) => ({ tool_use_id, tool, input: input(value) })),
     ...(row.toolResults && {
-      toolResults: row.toolResults.map(({ tool_use_id, text, isError }) => ({ tool_use_id, text: cut(text), isError })),
+      toolResults: results.map(({ tool_use_id, text, isError }) => ({ tool_use_id, text: cut(text), isError })),
     }),
   };
 }
@@ -124,8 +139,7 @@ export async function pruneArchives(fs: ArchiveFs, configDir: string, now: numbe
     const dir = `${root}/${session.name}`;
     const chunks = (await listOrNone(fs, dir)).filter((e) => e.kind === 'file' && CHUNK.test(e.name));
     if (chunks.length === 0 || now - Math.max(...chunks.map((c) => c.mtimeMs)) <= maxAgeMs) continue;
-    for (const chunk of chunks) {
-      if ((await fs.read(`${dir}/${chunk.name}`).catch(() => '')) === '') continue;
+    for (const chunk of chunks.filter((c) => c.size > 0)) {
       await fs.write(`${dir}/${chunk.name}`, '');
       emptied += 1;
     }

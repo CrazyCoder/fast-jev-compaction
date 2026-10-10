@@ -195,8 +195,10 @@ call keeps its uncut result:
   characters (a nested quantifier is matched as literal text); 5 hits per page,
   each with the lines around its first match.
 - `expand`: entries in full by `#N` or tool_use_id; a call shows its input and
-  its result, or the file Claude Code saved a large output to. Long text is cut
-  at a line end with an `offset` to continue from.
+  its result, or the file Claude Code saved a large output to (only from
+  `<config dir>/projects/<project>/<session>/tool-results/`: the path comes from
+  result text, which fetched content can forge). Long text is cut at a line end
+  with an `offset` to continue from.
 - `range`: entries `#from..#to`, one line each, 20 per page.
 
 An answer holds at most 48,000 characters, shared between expanded entries.

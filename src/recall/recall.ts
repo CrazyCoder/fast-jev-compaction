@@ -12,6 +12,9 @@ import type { Entry } from './transcript.js';
 /** The most one recall answer holds, in characters. */
 export const RECALL_MAX_CHARS = 48_000;
 
+/** The recall tool as the model calls it; its calls are not listed. */
+export const RECALL_TOOL = 'mcp__fast-jev-compaction__recall';
+
 export type RecallRequest = {
   /** Keywords, ranked by BM25; or a regex when it holds regex characters. */
   query?: string;
@@ -298,7 +301,7 @@ function runExpand(entries: readonly Entry[], refs: readonly (string | number)[]
  * left out: a query would always find itself.
  */
 export function runRecall(all: readonly Entry[], request: RecallRequest, deps: RecallDeps = {}): string {
-  const entries = all.filter((e) => !(e.kind === 'call' && e.tool.endsWith('__recall')));
+  const entries = all.filter((e) => !(e.kind === 'call' && e.tool === RECALL_TOOL));
   const page = request.page ?? 1;
   try {
     if (request.expand && request.expand.length > 0) {

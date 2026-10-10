@@ -1,7 +1,9 @@
 import type { Message } from '../types.js';
 import { archiveDir, archiveRows, loadArchive, type ArchiveFs } from './archive.js';
-import { resolveRefs, runRecall, type RecallRequest } from './recall.js';
+import { RECALL_TOOL, resolveRefs, runRecall, type RecallRequest } from './recall.js';
 import { entriesFromGroups } from './transcript.js';
+
+export { RECALL_TOOL };
 
 /**
  * The recall tool as the plugin offers it: its name, description and input
@@ -9,9 +11,8 @@ import { entriesFromGroups } from './transcript.js';
  * archive and live rows. Host calls stay in the hook; this takes plain values.
  */
 
-/** The short name `$.tool.register` takes; the model calls `mcp__fast-jev-compaction__recall`. */
+/** The short name `$.tool.register` takes; the model calls RECALL_TOOL. */
 export const RECALL_NAME = 'recall';
-export const RECALL_TOOL = `mcp__fast-jev-compaction__${RECALL_NAME}`;
 
 /** Archives of sessions untouched this long are emptied. */
 export const RECALL_MAX_AGE_MS = 30 * 86_400_000;
@@ -57,6 +58,22 @@ export function recallRequest(e: Record<string, unknown>): RecallRequest {
   };
 }
 
+/**
+ * Whether `path` is a file Claude Code saved a large output to:
+ * `<config>/projects/<project>/<session>/tool-results/<name>`. The path comes
+ * from text in a tool result, which a fetched page or file can forge, and
+ * recall reads it without the permission check a Read would get.
+ */
+export function isSavedOutput(path: string, configDir: string): boolean {
+  const normal = path.replace(/\\/g, '/');
+  const root = `${configDir.replace(/\\/g, '/').replace(/\/+$/, '')}/projects/`;
+  return (
+    normal.toLowerCase().startsWith(root.toLowerCase()) &&
+    !normal.split('/').includes('..') &&
+    /^[^/]+\/[^/]+\/tool-results\/[^/]+$/.test(normal.slice(root.length))
+  );
+}
+
 /** Answers a recall call from a session's archive under `configDir` and its live rows. */
 export async function answerRecall(
   fs: ArchiveFs,
@@ -70,7 +87,7 @@ export async function answerRecall(
   // Outputs Claude Code saved to a file, for the entries asked for in full.
   const saved = new Map<string, string>();
   for (const entry of resolveRefs(entries, request.expand ?? []).found) {
-    if (entry.kind !== 'call' || !entry.savedTo) continue;
+    if (entry.kind !== 'call' || !entry.savedTo || !configDir || !isSavedOutput(entry.savedTo, configDir)) continue;
     const text = await fs.read(entry.savedTo).catch(() => undefined);
     if (text !== undefined) saved.set(entry.savedTo, text);
   }

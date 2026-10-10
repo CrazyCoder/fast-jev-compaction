@@ -602,7 +602,7 @@ export function isHeadlessRefusal(error: unknown): boolean {
 }
 
 type RecallHost = LogHost & {
-  fs: { list: (path: string) => Promise<readonly { name: string; kind: string; mtimeMs: number }[]> };
+  fs: { list: (path: string) => Promise<readonly { name: string; kind: string; size: number; mtimeMs: number }[]> };
   session: { id: () => Promise<string> };
 };
 

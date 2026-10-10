@@ -35,6 +35,22 @@ describe('recall archive', () => {
     expect(groups.flat()).toHaveLength(16);
   });
 
+  it('keeps every chunk under the limit even for one row with many large parts', async () => {
+    const { fs, files } = memoryFs();
+    const big = 'é'.repeat(ARCHIVE_CHUNK_CHARS);
+    const row = {
+      role: 'user' as const,
+      text: big,
+      toolUses: [{ tool_use_id: 'w', tool: 'Write', input: { content: big } }],
+      toolResults: [1, 2, 3].map((i) => ({ tool_use_id: `r${i}`, text: big, isError: false })),
+    };
+    await archiveRows(fs, dir, [row]);
+    for (const [, file] of files) expect(file.text.length).toBeLessThanOrEqual(ARCHIVE_CHUNK_CHARS);
+    const [stored] = (await loadArchive(fs, dir)).flat();
+    expect(stored!.toolResults).toHaveLength(3);
+    expect(stored!.toolResults![0]!.text.length).toBeGreaterThan(100_000);
+  });
+
   it('reads nothing when there is no archive', async () => {
     expect(await loadArchive(memoryFs().fs, dir)).toEqual([]);
   });

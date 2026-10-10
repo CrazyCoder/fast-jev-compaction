@@ -53,10 +53,12 @@ describe('recall query', () => {
     const entries = [
       call('t1', 'Edit', { file_path: 'a.ts', old_string: `${'x'.repeat(500)} NEEDLE here` }, 'ok'),
       call('t2', 'mcp__fast-jev-compaction__recall', { query: 'NEEDLE' }, 'earlier answer about NEEDLE'),
+      call('t3', 'mcp__notes__recall', { query: 'NEEDLE' }, 'another server finds NEEDLE'),
     ];
     const out = runRecall(entries, { query: 'NEEDLE' });
     expect(out).toContain('NEEDLE here');
-    expect(out).not.toContain('t2');
+    expect(out).not.toContain('(t2)');
+    expect(out).toContain('(t3)');
   });
 
   it('says so when nothing matches', () => {
