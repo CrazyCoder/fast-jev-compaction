@@ -19,6 +19,9 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
   qmd installed that search uses a qmd index of the sessions
   (`sessionIndex: auto`, default; `off` always scans). Cut notes name the recall
   call instead of "re-run the tool" (`recallNotes` in the library).
+- `/recall-index`: shows the session index, builds it now for all projects or
+  the ones named by name part, path, folder or `.`, takes projects out of it, or
+  removes it.
 - `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
   SHA-256 on first use, which runs the recall tool; CI checks the line endings
   of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.

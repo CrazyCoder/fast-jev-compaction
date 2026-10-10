@@ -69,17 +69,19 @@ export function sessionMarkdown(title: string, label: string, entries: readonly 
 }
 
 /**
- * Writes the markdown of every session whose transcript changed since, but
- * the session `exclude` (the current one, which changes on every call), and
- * deletes the markdown of transcripts Claude Code has deleted. Exports are
- * readable by their owner only. Returns how many changed.
+ * Writes the markdown of every session in the `scope` projects whose
+ * transcript changed since, but the session `exclude` (the current one, which
+ * changes on every call), and deletes the markdown of transcripts Claude Code
+ * has deleted and of projects outside the scope. Exports are readable by
+ * their owner only. Returns how many changed.
  */
-export async function exportSessions(configDir: string, exclude?: string): Promise<number> {
+export async function exportSessions(configDir: string, exclude?: string, scope: IndexScope = 'all'): Promise<number> {
   let changedCount = 0;
   const root = sessionsDir(configDir);
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const live = new Set<string>();
-  for (const project of projects(configDir)) {
+  const covered = projects(configDir).filter((p) => scope === 'all' || scope.includes(p.slug));
+  for (const project of covered) {
     for (const file of transcripts(project.dir)) {
       const id = basename(file, '.jsonl');
       const md = join(root, project.slug, `${id}.md`);
@@ -109,8 +111,37 @@ export async function exportSessions(configDir: string, exclude?: string): Promi
         // Held open (qmd, on Windows): removed on a later export.
       }
     }
+    try {
+      if (readdirSync(join(root, slug.name)).length === 0) rmSync(join(root, slug.name), { recursive: true });
+    } catch {
+      // Removed on a later export.
+    }
   }
   return changedCount;
+}
+
+/** The projects an index covers: all of them, or these project folders. */
+export type IndexScope = 'all' | string[];
+
+const scopeFile = (configDir: string, name: string) => join(sessionsDir(configDir), `.scope-${name}.json`);
+
+/** The projects the index `name` covers; all when none were chosen. */
+export function readScope(configDir: string, name: string): IndexScope {
+  try {
+    const projects = (JSON.parse(readFileSync(scopeFile(configDir, name), 'utf8')) as { projects?: unknown }).projects;
+    if (Array.isArray(projects)) return projects.filter((p): p is string => typeof p === 'string');
+  } catch {
+    // No choice made: all projects.
+  }
+  return 'all';
+}
+
+/** Whether the projects the index `name` covers were chosen, rather than all by default. */
+export const hasScope = (configDir: string, name: string) => existsSync(scopeFile(configDir, name));
+
+export function writeScope(configDir: string, name: string, scope: IndexScope): void {
+  mkdirSync(sessionsDir(configDir), { recursive: true, mode: 0o700 });
+  writeFileSync(scopeFile(configDir, name), JSON.stringify({ projects: scope }), { mode: 0o600 });
 }
 
 type QmdResult = { file?: unknown; line?: unknown; snippet?: unknown };
@@ -188,9 +219,31 @@ function restrict(configDir: string, name: string, env: Env): void {
   }
 }
 
-/** Exports every session and builds the index; marks it ready when qmd succeeds. */
+/** Where qmd keeps the collections of the index `name`, under XDG_CONFIG_HOME or ~/.config. */
+function indexConfigFile(name: string, env: Env): string {
+  const config = env['XDG_CONFIG_HOME'] || join(env['HOME'] || env['USERPROFILE'] || homedir(), '.config');
+  return join(config, 'qmd', `${name}.yml`);
+}
+
+/** When the index `name` was last built, if it is ready. */
+export function builtAt(configDir: string, name: string): Date | undefined {
+  try {
+    return statSync(marker(configDir, name)).mtime;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Deletes the exports, the index `name` and its qmd collection config. */
+export function removeIndex(configDir: string, name: string, env: Env = process.env): void {
+  rmSync(sessionsDir(configDir), { recursive: true, force: true });
+  rmSync(indexFile(name, env), { force: true });
+  rmSync(indexConfigFile(name, env), { force: true });
+}
+
+/** Exports the sessions of the projects the index covers and builds it; marks it ready when qmd succeeds. */
 export async function buildIndex(configDir: string, command: readonly string[], name: string, env: Env = process.env): Promise<boolean> {
-  await exportSessions(configDir);
+  await exportSessions(configDir, undefined, readScope(configDir, name));
   // A collection left from an earlier build may point elsewhere: add it afresh.
   runQmd(command, name, ['collection', 'remove', COLLECTION], env);
   runQmd(command, name, ['collection', 'add', sessionsDir(configDir), '--name', COLLECTION], env);
@@ -201,6 +254,14 @@ export async function buildIndex(configDir: string, command: readonly string[], 
   rmSync(building(configDir, name), { force: true });
   return true;
 }
+
+/** Takes the build lock of the index `name`, unless a build holds it. */
+export function lockBuild(configDir: string, name: string): boolean {
+  mkdirSync(sessionsDir(configDir), { recursive: true, mode: 0o700 });
+  return takeBuildLock(building(configDir, name));
+}
+
+export const unlockBuild = (configDir: string, name: string) => rmSync(building(configDir, name), { force: true });
 
 /** Takes the build lock, unless a build that is not stale holds it or has just let it go. */
 function takeBuildLock(lock: string): boolean {
@@ -250,7 +311,7 @@ export function qmdIndex(configDir: string, { command, name = QMD_INDEX, backgro
         return undefined;
       }
       if (!(await buildIndex(configDir, command, name, env))) return undefined;
-    } else if ((await exportSessions(configDir, exclude)) > 0) {
+    } else if ((await exportSessions(configDir, exclude, readScope(configDir, name))) > 0) {
       runQmd(command, name, ['update'], env);
     }
     const found = runQmd(command, name, ['search', '-c', COLLECTION, '--format', 'json', '-n', String(SEARCH_HITS), '--', query], env);

@@ -15,8 +15,9 @@ type Run = { argv: readonly string[]; init?: { cwd?: string; stdin?: string; tim
 function hooks(options: Record<string, unknown> = {}) {
   const registered: Record<string, Hook> = {};
   (register as unknown as (on: unknown, options: unknown) => void)(
-    (event: string, filterOrHook: Hook | { tool: string }, hook?: Hook) => {
-      registered[typeof filterOrHook === 'function' ? event : `${event}:${filterOrHook.tool}`] = hook ?? (filterOrHook as Hook);
+    (event: string, filterOrHook: Hook | { tool?: string; command?: string }, hook?: Hook) => {
+      const key = typeof filterOrHook === 'function' ? event : `${event}:${filterOrHook.tool ?? filterOrHook.command}`;
+      registered[key] = hook ?? (filterOrHook as Hook);
     },
     options,
   );
@@ -46,6 +47,7 @@ const realCli = async (argv: readonly string[], init?: Run['init']) => {
 function host(home: string, run: (argv: readonly string[], init?: Run['init']) => Promise<unknown> = realCli) {
   const runs: Run[] = [];
   const toolRegister = vi.fn(async (spec: { name: string }) => ({ tool: `mcp__fast-jev-compaction__${spec.name}` }));
+  const commandRegister = vi.fn(async (spec: { name: string }) => ({ command: spec.name }));
   const $ = {
     env: { get: async (name: string) => ({ HOME: home, TYPESAFE_API_KEY: 'k' })[name] },
     fs: { exists: async () => false, read: async () => '', write: async () => {} },
@@ -53,6 +55,7 @@ function host(home: string, run: (argv: readonly string[], init?: Run['init']) =
     clock: { sleep: () => new Promise<void>(() => {}) },
     ui: { log: () => {}, toast: () => {} },
     tool: { register: toolRegister },
+    command: { register: commandRegister },
     plugin: { root: ROOT },
     process: {
       run: async (argv: readonly string[], init?: Run['init']) => {
@@ -63,7 +66,7 @@ function host(home: string, run: (argv: readonly string[], init?: Run['init']) =
     session: { id: async () => 'sess-1', messages: async () => [], usage: async () => ({ context: {} }) },
     http: { fetch: cutAll },
   };
-  return { $, runs, toolRegister };
+  return { $, runs, toolRegister, commandRegister };
 }
 
 /** A home whose ~/.claude holds session sess-1's transcript. */
@@ -94,6 +97,19 @@ describe('recall in the hook', () => {
     const { $, toolRegister } = host('/home/me');
     await hooks()['session.start']!($, {}, async () => ({ cwd: '.' }));
     expect(toolRegister).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall' }));
+  });
+
+  it('registers /recall-index and answers it with the recall script', async () => {
+    const home = homeWithTranscript();
+    const { $, runs, commandRegister } = host(home);
+    const registered = hooks();
+    await registered['session.start']!($, {}, async () => ({ cwd: '.' }));
+    expect(commandRegister).toHaveBeenCalledWith(expect.objectContaining({ name: 'recall-index' }));
+    const out = (await registered['command.run:recall-index']!($, { command: 'recall-index', args: '' }, async () => ({}))) as { text: string };
+    expect(out.text).toMatch(/^No session index yet/);
+    expect(JSON.parse(runs.at(-1)!.init!.stdin!)).toMatchObject({ indexCommand: '' });
+    // A build of every project can take minutes.
+    expect(runs.at(-1)!.init!.timeoutMs).toBeGreaterThanOrEqual(600_000);
   });
 
   it('answers a call by running the recall script on the session transcript', async () => {

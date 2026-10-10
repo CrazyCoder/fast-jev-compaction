@@ -13,6 +13,13 @@ export { RECALL_TOOL };
 /** The short name `$.tool.register` takes; the model calls RECALL_TOOL. */
 export const RECALL_NAME = 'recall';
 
+/** `/recall-index`: shows, builds or removes the index of past sessions (src/recall/index-command.ts). */
+export const RECALL_INDEX_COMMAND = {
+  name: 'recall-index',
+  description: 'Show, build or remove the qmd index recall searches past sessions with',
+  argumentHint: '[status | all | <project name or path>… | remove [<project>…]]',
+};
+
 export const RECALL_DESCRIPTION = [
   'Recall earlier parts of this session, including the tool calls and results that compaction cut or dropped, and of past sessions in this project or others.',
   'Use it before saying the context is gone, instead of running a tool again to see its old output, and when the user points at earlier work ("as we did in the billing-api session").',

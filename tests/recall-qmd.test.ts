@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { buildIndex, exportSessions, indexedHits, qmdCommand, sessionMarkdown, sessionsDir } from '../src/recall/qmd.ts';
 import { searchSessions } from '../src/recall/sessions.ts';
 import { qmdIndex } from '../src/recall/qmd.ts';
+import { fakeQmd } from './helpers/fake-qmd.ts';
 
 const ID = '33333333-3333-4333-8333-333333333333';
 
@@ -84,22 +85,6 @@ describe('session export', () => {
  * A stand-in for qmd: logs its arguments, answers `search` with FAKE_SEARCH
  * and FAKE_STATUS, and succeeds at everything else.
  */
-function fakeQmd(): { command: string[]; log: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'fake-qmd-'));
-  const script = join(dir, 'qmd.cjs');
-  const log = join(dir, 'args.log');
-  writeFileSync(
-    script,
-    [
-      "const fs = require('fs');",
-      'const args = process.argv.slice(2);',
-      'fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + "\\n");',
-      "if (args.includes('search')) { process.stdout.write(process.env.FAKE_SEARCH ?? '[]'); process.exit(Number(process.env.FAKE_STATUS ?? 0)); }",
-    ].join('\n'),
-  );
-  return { command: [process.execPath, script], log };
-}
-
 describe('the session index', () => {
   const ask = async (dir: string, query: string, project: string, env: Record<string, string>) => {
     const fake = fakeQmd();
@@ -152,7 +137,8 @@ describe('session export upkeep', () => {
     expect(readdirSync(exported)).toEqual([`${other}.md`]);
     rmSync(join(project, `${other}.jsonl`));
     await exportSessions(dir, ID);
-    expect(readdirSync(exported)).toEqual([]);
+    // The project's last export went, and its folder with it.
+    expect(existsSync(exported)).toBe(false);
   });
 
   it.skipIf(process.platform === 'win32')('writes exports readable by their owner only', async () => {

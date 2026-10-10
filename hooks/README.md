@@ -239,7 +239,8 @@ copies after each boundary, and keeps each call's first, uncut result:
   index file are made readable by their owner only on each build, and an export
   goes when Claude Code removes its transcript after `cleanupPeriodDays`. On
   Windows the npm `qmd.cmd` shim is run as its script under the shim's own Node.
-  `sessionIndex: "off"` always scans.
+  `sessionIndex: "off"` always scans. `/recall-index` builds, shows or removes
+  that index on demand (below).
 - `session: "<id or its first 8+ characters>"` runs `query`, `expand`, `range`,
   `touched` or `agent` on that session instead of this one.
 - `agent`: subagents keep their own transcripts under `<session>/subagents/`.
@@ -259,6 +260,35 @@ removes old ones after `cleanupPeriodDays`; the only copies are the session
 index's exports above. The ranking and regex mode are adapted from
 [pi-vcc](https://github.com/sting8k/pi-vcc), the answer budget from
 [pi-blackhole](https://github.com/k0valik/pi-blackhole) (both MIT).
+
+### `/recall-index`
+
+With `recall` on, the plugin adds the slash command `/recall-index`, which
+builds, shows or removes the session index on demand instead of waiting for the
+first cross-session search to build it in the background:
+
+| Command | Does |
+| -- | -- |
+| `/recall-index` or `/recall-index status` | Which projects the index covers, how many sessions are exported, the index size and when it was last built |
+| `/recall-index all` | Indexes every project's sessions now |
+| `/recall-index <project>…` | Indexes these projects now, added to the ones it covers |
+| `/recall-index remove <project>…` | Takes these projects out of the index |
+| `/recall-index remove` | Deletes the exports, the index and its qmd collection |
+
+A project is named by any part of its folder name (`billing`), by its path in
+any slash style or case (`C:\work\app`, `c:/WORK/app/`), by `~/…`, by a path
+relative to this session's project, or by `.` for this session's project. A
+folder takes every project under it: `/recall-index C:\work` indexes all
+projects in `C:\work`. Separate several with spaces or commas, and quote a path
+that has spaces. A name that matches nothing is reported, and nothing is built
+for it.
+
+The command waits for the build and reports what it did, for example
+`Indexed 292 sessions in 14 projects (…) in 18.4 s; index 165.6 MB.`. Once
+projects are chosen, later searches keep only those up to date; a search in any
+other project scans its transcripts. An index the first search built for all
+projects keeps covering all of them. Without qmd the command says how to install
+it (`npm install -g @tobilu/qmd`); recall never installs it.
 
 ## Scope and caveat
 

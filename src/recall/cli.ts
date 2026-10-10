@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { readEntries } from './files.ts';
 import { resolveRefs, runRecall, type RecallDeps, type RecallRequest } from './recall.ts';
 import { buildIndex, qmdCommand, qmdIndex } from './qmd.ts';
+import { runIndexCommand } from './index-command.ts';
 import { findSession, searchSessions } from './sessions.ts';
 import { isSavedOutput } from './tool.ts';
 import type { Entry } from './transcript.ts';
@@ -22,7 +23,9 @@ import type { Entry } from './transcript.ts';
 export type CliInput = {
   configDir: string;
   sessionId: string;
-  request: RecallRequest;
+  request?: RecallRequest;
+  /** The arguments of `/recall-index`, which runs instead of `request`. */
+  indexCommand?: string;
   sessionIndex?: 'auto' | 'off';
   rg?: string;
   scanBudgetMs?: number;
@@ -109,7 +112,8 @@ export function findTranscript(configDir: string, sessionId: string): string | u
   return undefined;
 }
 
-export async function answer({ configDir, sessionId, request, sessionIndex = 'auto', rg, scanBudgetMs }: CliInput): Promise<string> {
+export async function answer({ configDir, sessionId, request = {}, indexCommand, sessionIndex = 'auto', rg, scanBudgetMs }: CliInput): Promise<string> {
+  if (indexCommand !== undefined) return runIndexCommand({ configDir, sessionId, args: indexCommand, command: qmdCommand() });
   const file = /^[\w-]+$/.test(sessionId) ? findTranscript(configDir, sessionId) : undefined;
   if (!file) return 'Recall: no transcript found for this session.';
   const { sessions, project, session, ...rest } = request;

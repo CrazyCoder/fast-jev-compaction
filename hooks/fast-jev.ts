@@ -16,6 +16,7 @@ import { dropTransientReminders, foldHiddenContent, hiddenContent, type ApiMessa
 import { DECISIONS_MODEL, wireFor, type JevProvider } from '../src/decisions.js';
 import {
   RECALL_DESCRIPTION,
+  RECALL_INDEX_COMMAND,
   RECALL_INPUT_SCHEMA,
   RECALL_NAME,
   recallCommand,
@@ -628,6 +629,8 @@ export function isHeadlessRefusal(error: unknown): boolean {
 
 /** How long one recall answer may take; the first one may download Node. */
 const RECALL_TIMEOUT_MS = 120_000;
+/** A /recall-index build of every project reads every transcript. */
+const RECALL_INDEX_TIMEOUT_MS = 900_000;
 
 type RecallHost = {
   plugin: { root: string };
@@ -655,10 +658,24 @@ export const register: Register = (on: On, options: PluginOptions) => {
       const started = await next(event);
       try {
         await $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA });
+        await $.command.register(RECALL_INDEX_COMMAND);
       } catch (error) {
         debugLog($, `recall: ${error instanceof Error ? error.message : String(error)}`);
       }
       return started;
+    });
+    // RECALL_INDEX_COMMAND.name, spelled out so `claude plugin validate` can read the filter.
+    on('command.run', { command: 'recall-index' }, async ($, e) => {
+      try {
+        const base = await configDir($);
+        if (!base) return { text: 'recall-index: no config dir (CLAUDE_CONFIG_DIR, HOME or USERPROFILE).' };
+        const input = { configDir: base, sessionId: await $.session.id(), indexCommand: e.args.trim() };
+        const run = await runRecallCli($, JSON.stringify(input), RECALL_INDEX_TIMEOUT_MS);
+        if (run.exitCode !== 0) return { text: `recall-index failed: ${(run.stderr || run.stdout).trim().slice(0, 500)}` };
+        return { text: run.stdout };
+      } catch (error) {
+        return { text: `recall-index failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
     });
     // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
     on('tool.call', { tool: 'mcp__fast-jev-compaction__recall' }, async ($, e) => {
