@@ -3,10 +3,10 @@ import { RECALL_MAX_CHARS, runRecall } from '../src/recall/recall.js';
 import type { Entry } from '../src/recall/transcript.js';
 
 let n = 0;
-const prompt = (text: string): Entry => ({ n: ++n, line: n, kind: 'prompt', text });
-const reply = (text: string): Entry => ({ n: ++n, line: n, kind: 'reply', text });
+const prompt = (text: string): Entry => ({ n: ++n, kind: 'prompt', text });
+const reply = (text: string): Entry => ({ n: ++n, kind: 'reply', text });
 const call = (id: string, tool: string, input: Record<string, unknown>, result?: string, extra: Partial<Entry> = {}): Entry =>
-  ({ n: ++n, line: n, kind: 'call', id, tool, input, ...(result !== undefined && { result }), ...extra }) as Entry;
+  ({ n: ++n, kind: 'call', id, tool, input, ...(result !== undefined && { result }), ...extra }) as Entry;
 
 function session(): Entry[] {
   n = 0;
@@ -40,12 +40,8 @@ describe('recall query', () => {
     expect([...runRecall(many, { query: 'deploy', page: 3 }).matchAll(/^#\d+/gm)]).toHaveLength(2);
   });
 
-  it('treats a query with regex characters as a regex, and never runs a nested quantifier', () => {
+  it('treats a query with regex characters as a regex', () => {
     expect(runRecall(session(), { query: 'npm (test|run)' })).toMatch(/^#5/m);
-    const started = Date.now();
-    const out = runRecall([prompt(`${'a'.repeat(40)}!`)], { query: '(a+)+$' });
-    expect(Date.now() - started).toBeLessThan(1000);
-    expect(out).toMatch(/no match/i);
   });
 
   it('shows where in a long input line the match is, and never lists recall calls', () => {
@@ -59,6 +55,24 @@ describe('recall query', () => {
     expect(out).toContain('NEEDLE here');
     expect(out).not.toContain('(t2)');
     expect(out).toContain('(t3)');
+  });
+
+  it('matches a regex that could backtrack without end as literal text', () => {
+    n = 0;
+    const entries = [prompt(`${'a'.repeat(28)}!`), prompt(`${'a'.repeat(40)}`)];
+    for (const query of ['(a|a)*b', '(.*a){12}b', 'a*a*a*a*b', '(a+)+$', '(x)\\1+']) {
+      const started = Date.now();
+      runRecall(entries, { query });
+      expect(Date.now() - started, query).toBeLessThan(500);
+    }
+  });
+
+  it('falls back to keywords when a query that looks like a regex finds nothing', () => {
+    expect(runRecall(session(), { query: 'redis$' })).toMatch(/^#2 call Bash/m);
+  });
+
+  it('keeps a long query out of the answer', () => {
+    expect(runRecall(session(), { query: 'zzz '.repeat(2_000) }).length).toBeLessThan(400);
   });
 
   it('says so when nothing matches', () => {
@@ -105,6 +119,19 @@ describe('recall expand', () => {
     expect(out.length).toBeLessThanOrEqual(RECALL_MAX_CHARS);
     expect(out).toContain('#1 call Read (t1)');
     expect(out).toContain('#2 call Read (t2)');
+  });
+
+  it('never answers past the budget, however many entries are asked for', () => {
+    n = 0;
+    const input = { content: 'i'.repeat(3_000) };
+    const many = Array.from({ length: 50 }, (_, i) => call(`t${i}`, 'Write', input, `${'r'.repeat(80)}\n`.repeat(600)));
+    for (const count of [1, 5, 10, 11, 22, 50]) {
+      const out = runRecall(many, { expand: many.slice(0, count).map((e) => (e.kind === 'call' ? e.id : '')) });
+      expect(out.length, `${count} entries`).toBeLessThanOrEqual(RECALL_MAX_CHARS);
+    }
+    const capped = runRecall(many, { expand: many.slice(0, 12).map((e) => (e.kind === 'call' ? e.id : '')) });
+    expect([...capped.matchAll(/^#\d+ call/gm)]).toHaveLength(10);
+    expect(capped).toMatch(/Not shown, 10 per answer: t10, t11/);
   });
 
   it('names the references it could not find', () => {

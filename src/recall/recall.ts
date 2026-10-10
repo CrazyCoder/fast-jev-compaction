@@ -38,8 +38,13 @@ const RANGE_PAGE = 20;
 const SNIPPET_LINE_CHARS = 200;
 const PREVIEW_CHARS = 200;
 const INPUT_CHARS = 2_000;
-const EXPAND_FLOOR = 2_000;
-const EXPAND_OVERHEAD = 200;
+/** The most entries one expand answer shows; the rest are named for another call. */
+const EXPAND_MAX = 10;
+/** Room kept for the "not shown" and "not found" notes. */
+const NOTES_CHARS = 3_000;
+/** Room for a cut note: "[cut at N of M chars; continue: expand: [\"<id>\"], offset: N]". */
+const CUT_NOTE_CHARS = 200;
+const QUERY_ECHO_CHARS = 100;
 const SEARCH_BUDGET_MS = 3_000;
 
 const USAGE = [
@@ -65,13 +70,20 @@ function quantifierAt(pattern: string, i: number): { len: number; unbounded: boo
   return { len: 0, unbounded: false };
 }
 
-/** An unbounded quantifier on a group that holds one, such as `(a+)+`: exponential on a miss. */
-function hasNestedQuantifier(pattern: string): boolean {
-  const groups: boolean[] = [];
+/**
+ * Whether the pattern can backtrack without end. A running `RegExp.test` cannot
+ * be stopped, so anything that might is matched as literal text: a quantified
+ * group (`(a|a)*`, `(.*a){12}`, `(a+)+`), a back reference, or more than two
+ * unbounded quantifiers (`a*a*a*b`). What is left (literals, classes, a `.*` or
+ * two, groups without a quantifier) runs in polynomial time.
+ */
+function isRisky(pattern: string): boolean {
   let inClass = false;
+  let unbounded = 0;
   for (let i = 0; i < pattern.length; i += 1) {
     const c = pattern[i];
     if (c === '\\') {
+      if (/[1-9k]/.test(pattern[i + 1] ?? '')) return true;
       i += 1;
       continue;
     }
@@ -83,30 +95,16 @@ function hasNestedQuantifier(pattern: string): boolean {
       inClass = true;
       continue;
     }
-    if (c === '(') {
-      groups.push(false);
-      continue;
-    }
-    if (c === ')') {
-      const inner = groups.pop() ?? false;
-      const q = quantifierAt(pattern, i + 1);
-      if (inner && q.unbounded) return true;
-      if (groups.length) groups[groups.length - 1] ||= inner || q.unbounded;
-      i += q.len;
-      continue;
-    }
     const q = quantifierAt(pattern, i);
-    if (q.unbounded && groups.length) {
-      groups[groups.length - 1] = true;
-      i += q.len - 1;
-    }
+    if (q.unbounded && ++unbounded > 2) return true;
+    if (c === ')' && (quantifierAt(pattern, i + 1).len > 0 || pattern[i + 1] === '?')) return true;
   }
   return false;
 }
 
-/** The pattern as a case-insensitive regex, or as literal text when it is unsafe or invalid. */
+/** The pattern as a case-insensitive regex, or as literal text when it is risky or invalid. */
 function safeRegex(pattern: string, flags = 'i'): RegExp {
-  if (!hasNestedQuantifier(pattern)) {
+  if (!isRisky(pattern)) {
     try {
       return new RegExp(pattern, flags);
     } catch {
@@ -139,7 +137,11 @@ function deadline(): () => void {
   };
 }
 
-/** The entries matching `query`, best first, with the regex that finds each hit's snippet. */
+/**
+ * The entries matching `query`, best first, with the regex that finds each
+ * hit's snippet. A query with regex characters is tried as a regex first; when
+ * that finds nothing, its words are ranked instead (`fix?`, `$HOME`).
+ */
 function search(entries: readonly Entry[], query: string): { hits: Entry[]; marker: RegExp } {
   const check = deadline();
   const docs = entries.map(docOf);
@@ -150,7 +152,8 @@ function search(entries: readonly Entry[], query: string): { hits: Entry[]; mark
       check();
       if (re.test(doc)) hits.push(entries[i]!);
     });
-    return { hits: hits.reverse(), marker: re };
+    if (hits.length > 0) return { hits: hits.reverse(), marker: re };
+    query = query.replace(/[|*+?{}()[\]\\^$]/g, ' ');
   }
   const words = query.split(/\s+/).filter(Boolean);
   const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()) && w.length > 1);
@@ -220,14 +223,15 @@ function pager(total: number, size: number, page: number): { from: number; pages
 
 function runQuery(entries: readonly Entry[], query: string, page: number): string {
   const { hits, marker } = search(entries, query);
-  if (hits.length === 0) return `No match for "${query}".`;
+  const echo = clip(query, QUERY_ECHO_CHARS);
+  if (hits.length === 0) return `No match for "${echo}".`;
   const p = pager(hits.length, QUERY_PAGE, page);
   const blocks = hits
     .slice(p.from, p.from + QUERY_PAGE)
     .map((entry) => `${heading(entry)}\n${snippet(docOf(entry), marker)}`);
   const next = p.page < p.pages ? ` Next: page: ${p.page + 1}.` : '';
   return [
-    `${hits.length} match(es) for "${query}", page ${p.page}/${p.pages}:`,
+    `${hits.length} match(es) for "${echo}", page ${p.page}/${p.pages}:`,
     ...blocks,
     `Full text: expand: ["#N"] or a tool_use_id.${next}`,
   ].join('\n\n');
@@ -245,15 +249,22 @@ function runRange(entries: readonly Entry[], [from, to]: readonly [number, numbe
   return `Entries #${from}..#${to}, page ${p.page}/${p.pages}:\n${lines.join('\n')}${next}`;
 }
 
-/** What each of `count` expanded entries may take of the budget (pi-blackhole's split). */
+/**
+ * What each of `count` expanded entries may take of the budget: an even share
+ * of it after room for the notes on refs not found or not shown (pi-blackhole
+ * splits its budget the same way). With at most EXPAND_MAX entries, a share is
+ * never under 4,000 characters.
+ */
 function share(count: number): number {
-  const usable = Math.max(0, RECALL_MAX_CHARS - 400 - count * EXPAND_OVERHEAD);
-  const even = Math.floor(usable / count);
-  return count * EXPAND_FLOOR <= usable ? Math.max(even, EXPAND_FLOOR) : even;
+  return Math.floor((RECALL_MAX_CHARS - NOTES_CHARS) / count);
 }
 
-/** `text` from `offset`, cut at a line end within `room`; the cut says where to go on. */
-function window(text: string, offset: number, room: number, ref: string): string {
+/**
+ * `text` from `offset`, cut at a line end within `room` (never below zero);
+ * the cut note, at most CUT_NOTE_CHARS, says where to go on.
+ */
+function window(text: string, offset: number, available: number, ref: string): string {
+  const room = Math.max(0, available);
   const rest = text.slice(offset);
   if (rest.length <= room) return rest;
   const newline = rest.lastIndexOf('\n', room - 1);
@@ -281,18 +292,31 @@ export function resolveRefs(
   return { found, missing };
 }
 
+/** Refs for a note, the list and each ref bounded. */
+function refList(refs: readonly string[]): string {
+  const shown = refs.slice(0, 20).map((ref) => clip(ref, 60));
+  return `${shown.join(', ')}${refs.length > shown.length ? `, and ${refs.length - shown.length} more` : ''}`;
+}
+
 function runExpand(entries: readonly Entry[], refs: readonly (string | number)[], offset: number, deps: RecallDeps): string {
   const { found, missing } = resolveRefs(entries, refs);
-  const room = found.length > 0 ? share(found.length) : 0;
-  const blocks = found.map((entry) => {
-    if (entry.kind !== 'call') return `${heading(entry)}\n${window(entry.text, offset, room, `#${entry.n}`)}`;
+  const shown = found.slice(0, EXPAND_MAX);
+  const room = shown.length > 0 ? share(shown.length) : 0;
+  const blocks = shown.map((entry) => {
+    const head = `${heading(entry)}\n`;
+    if (entry.kind !== 'call') return head + window(entry.text, offset, room - head.length - CUT_NOTE_CHARS, `#${entry.n}`);
     const saved = entry.savedTo ? deps.readFile?.(entry.savedTo) : undefined;
     const result = saved ?? entry.result ?? '(no result)';
-    const input = offset === 0 ? `input:\n${clip(JSON.stringify(entry.input, null, 2), INPUT_CHARS)}\n` : '';
-    const label = `result${entry.isError ? ' (error)' : ''}${saved ? `, from ${entry.savedTo}` : ''}:\n`;
-    return `${heading(entry)}\n${input}${label}${window(result, offset, room - input.length - label.length, entry.id)}`;
+    const inputChars = Math.min(INPUT_CHARS, Math.floor(room / 3));
+    const input = offset === 0 ? `input:\n${clip(JSON.stringify(entry.input, null, 2), inputChars)}\n` : '';
+    const from = saved ? `, from ${clip(entry.savedTo!, 160)}` : entry.savedTo ? ' (a preview; the saved full output could not be read)' : '';
+    const label = `result${entry.isError ? ' (error)' : ''}${from}:\n`;
+    const left = room - head.length - input.length - label.length - CUT_NOTE_CHARS;
+    return `${head}${input}${label}${window(result, offset, left, entry.id)}`;
   });
-  if (missing.length > 0) blocks.push(`Not found: ${missing.join(', ')}.`);
+  const rest = found.slice(EXPAND_MAX).map((e) => (e.kind === 'call' ? e.id : `#${e.n}`));
+  if (rest.length > 0) blocks.push(`Not shown, ${EXPAND_MAX} per answer: ${refList(rest)}. Expand them in another call.`);
+  if (missing.length > 0) blocks.push(`Not found: ${refList(missing)}.`);
   return blocks.join('\n\n');
 }
 
