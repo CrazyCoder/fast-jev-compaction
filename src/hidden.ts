@@ -125,9 +125,13 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
     return undefined;
   };
 
+  // Text an earlier compaction folded in is in the rows already: never again.
+  const inRows = rows
+    .flatMap((row) => [row.text, ...(row.toolResults ?? []).map((result) => result.text)])
+    .join('\n');
   const out: HiddenContent[] = [];
   const add = (anchor: HiddenAnchor | undefined, text: string): void => {
-    if (!anchor || !text.trim()) return;
+    if (!anchor || !text.trim() || inRows.includes(text)) return;
     const last = out.at(-1);
     if (last && sameAnchor(last.anchor, anchor)) last.text += `${PIECE_SEPARATOR}${text}`;
     else out.push({ anchor, text });
@@ -153,7 +157,7 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
         Array.isArray(block['content']) &&
         block['content'].some((part) => (part as ApiBlock | null)?.type === 'tool_reference'),
     );
-    let index = 0;
+    let index = others.length === blocks.length ? sessionContextEnd(others) : 0;
     while (index < others.length) {
       const prompt = promptAt(others, index);
       if (prompt) {
@@ -177,6 +181,23 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
     first = false;
   }
   return out;
+}
+
+const SESSION_CONTEXT = /^<system-reminder>\s*# Environment\b/;
+
+/**
+ * Where the session context ends in a message of text blocks: the leading
+ * run of <system-reminder> blocks when it holds the environment reminder
+ * (with CLAUDE.md, skill and tool lists, the date beside it), else 0. The
+ * host sends that context ahead of the first prompt and again after each
+ * compaction, so it is never folded back.
+ */
+function sessionContextEnd(blocks: readonly ApiBlock[]): number {
+  let end = 0;
+  while (end < blocks.length && blocks[end]!.type === 'text' && String(blocks[end]!['text']).startsWith('<system-reminder>')) {
+    end += 1;
+  }
+  return blocks.slice(0, end).some((block) => SESSION_CONTEXT.test(String(block['text']))) ? end : 0;
 }
 
 function sameAnchor(a: HiddenAnchor, b: HiddenAnchor): boolean {

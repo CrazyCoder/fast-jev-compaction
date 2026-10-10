@@ -94,6 +94,54 @@ function session() {
   return { rows, api };
 }
 
+describe('hidden content on a second compaction', () => {
+  const context = [
+    { type: 'text', text: '<system-reminder>\n# Environment\ncwd\n</system-reminder>' },
+    { type: 'text', text: "<system-reminder>\nToday's date is 2026-10-10.\n</system-reminder>" },
+    { type: 'text', text: '<system-reminder>\nThe following skills are available for use with the Skill tool:\n- x\n</system-reminder>' },
+  ];
+
+  it('skips the session context the host re-sends after a compaction, and what is already in the rows', () => {
+    const folded = 'Base directory for this skill: /x\n\nThe skill body.';
+    const rows: Message[] = [
+      user('first prompt'),
+      call('s1', 'Skill'),
+      result('s1', `Launching skill: probe\n\n${folded}`),
+      { role: 'assistant', text: 'ok', toolUses: [] },
+      user('<command-name>/compact</command-name>'),
+      user('second prompt'),
+      { role: 'assistant', text: 'ok', toolUses: [] },
+    ];
+    const api: ApiMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'first prompt' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 's1' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 's1', content: `Launching skill: probe\n\n${folded}` },
+          { type: 'text', text: folded },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      {
+        role: 'user',
+        content: [
+          ...context,
+          { type: 'text', text: '<local-command-caveat>Caveat</local-command-caveat>' },
+          { type: 'text', text: '<command-name>/compact</command-name>' },
+          { type: 'text', text: 'second prompt' },
+          { type: 'text', text: '<system-reminder>\nContents of b.ts\n</system-reminder>' },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ];
+    expect(hiddenContent(rows, api).map((h) => h.text)).toEqual([
+      '<local-command-caveat>Caveat</local-command-caveat>',
+      '<system-reminder>\nContents of b.ts\n</system-reminder>',
+    ]);
+  });
+});
+
 describe('hidden content after a compaction and with unmatched rows', () => {
   it('never takes a prompt row text for hidden content, even after a row it cannot find', () => {
     const rows: Message[] = [
