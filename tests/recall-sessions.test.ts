@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -143,16 +144,19 @@ describe('recall across sessions', () => {
     expect(await ask(dir, { session: 'deadbeef', query: 'x' })).toBe('No session matches "deadbeef".');
   });
 
-  it('finds the same candidate files with or without ripgrep', () => {
+  const projectDirs = (dir: string) => [join(dir, 'projects', 'C--work-app'), join(dir, 'projects', 'c--work-billing-api')];
+
+  it('takes every transcript as a candidate without ripgrep; the line scan then decides', () => {
+    expect(candidateFiles(projectDirs(config()), ['jscpd', 'baseline'], 'no-such-ripgrep')).toHaveLength(3);
+  });
+
+  // CI installs ripgrep; elsewhere this runs only where rg is on the PATH.
+  it.skipIf(spawnSync('rg', ['--version']).status !== 0)('narrows the candidates with ripgrep, to the same answer', async () => {
     const dir = config();
-    const dirs = [join(dir, 'projects', 'C--work-app'), join(dir, 'projects', 'c--work-billing-api')];
-    const sorted = (files: string[]) => files.map((f) => f.replace(/\\/g, '/')).sort();
-    const withRg = candidateFiles(dirs, ['jscpd', 'baseline'], 'rg');
+    const withRg = candidateFiles(projectDirs(dir), ['jscpd', 'baseline'], 'rg');
     expect(withRg.map((f) => f.includes(OTHER_PROJECT))).toEqual([true]);
-    // Without ripgrep every transcript is a candidate; the line scan then decides.
-    expect(sorted(candidateFiles(dirs, ['jscpd', 'baseline'], 'no-such-ripgrep'))).toHaveLength(3);
     const ask3 = (rg: string) =>
       answer({ configDir: dir, sessionId: CURRENT, request: { sessions: 'jscpd baseline', project: 'all' }, sessionIndex: 'off', rg });
-    return Promise.all([ask3('rg'), ask3('no-such-ripgrep')]).then(([a, b]) => expect(b).toBe(a));
+    expect(await ask3('no-such-ripgrep')).toBe(await ask3('rg'));
   });
 });
