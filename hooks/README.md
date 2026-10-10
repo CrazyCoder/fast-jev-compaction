@@ -222,9 +222,12 @@ copies after each boundary, and keeps each call's first, uncut result:
   `project: "all"` in every one. A session counts when it holds every keyword
   (any keyword when none holds all); ripgrep picks those transcripts when it is
   on the PATH, and only their matching lines are read, for at most 30 s. A query
-  of only stopwords or single characters is refused. Hits are numbered by rank
-  and labelled with the project, the date, the session title (or first prompt)
-  and the session id; open one with `session`. With qmd installed and
+  of only stopwords or single characters is refused. This session is not among
+  the results, since `query` searches it live and in full; when the searched
+  projects include it, a last line counts its matches
+  (`Also in this session: 121 matches; …`). Hits are numbered by rank and
+  labelled with the project, the date, the session title (or first prompt) and
+  the session id; open one with `session`. With qmd installed and
   `sessionIndex: "auto"` (the default), the search goes through a qmd index
   instead: each transcript is exported as markdown to
   `<config dir>/fast-jev-compaction/sessions/<project>/<session>.md` (prompts,

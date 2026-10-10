@@ -258,6 +258,11 @@ export type QueryText = {
   ranked?: boolean;
 };
 
+/** How many entries `query` finds, as `query` would rank them. */
+export function countMatches(entries: readonly Entry[], query: string): number {
+  return search(entries, query).hits.length;
+}
+
 /** Ranked hits for `query`, a page at a time. */
 export function runQuery(entries: readonly Entry[], query: string, page: number, text: QueryText = {}): string {
   const { hits, marker } = search(entries, query);

@@ -11,7 +11,7 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
-import { keywords, runQuery, tooBroad } from './recall.ts';
+import { countMatches, keywords, runQuery, tooBroad } from './recall.ts';
 import {
   lines,
   noteMeta,
@@ -19,6 +19,7 @@ import {
   projectCwd,
   projectName,
   projects,
+  readEntries,
   transcripts,
   type Project,
   type SessionMeta,
@@ -159,13 +160,15 @@ export async function searchSessions(
     if (picked.length === 0) return `No project matches "${oneLine(project!, 60)}".`;
   }
   const exclude = basename(currentFile, '.jsonl');
+  // This session is left out of the results, which `query` searches better; say how much it holds.
+  const here = picked.some((p) => p.dir === join(currentFile, '..')) ? await thisSession(currentFile, query) : '';
   let indexed: IndexedHit[] | undefined;
   try {
     indexed = await index?.(query, new Set(picked.map((p) => p.slug)), exclude);
   } catch {
     // An index that fails leaves the search to the scan below.
   }
-  if (indexed) return indexedAnswer(indexed, query, page, scope);
+  if (indexed) return indexedAnswer(indexed, query, page, scope) + here;
 
   for (const p of picked) {
     if (p.cwd) continue;
@@ -203,12 +206,25 @@ export async function searchSessions(
     for (const entry of hits.entries) entries.push({ ...entry, n: entries.length + 1, where });
   }
   const sessionsIn = (hits: readonly Entry[]) => new Set(hits.map((h) => h.where)).size;
-  return runQuery(entries, query, page, {
-    scope: (hits) => `in ${sessionsIn(hits)} session(s) ${scope}`,
-    footer: `${FOOTER}${partial}`,
-    none: (echo) => `No match for "${echo}" in the other sessions ${scope}.${partial}`,
-    ranked: true,
-  });
+  return (
+    runQuery(entries, query, page, {
+      scope: (hits) => `in ${sessionsIn(hits)} session(s) ${scope}`,
+      footer: `${FOOTER}${partial}`,
+      none: (echo) => `No match for "${echo}" in the other sessions ${scope}.${partial}`,
+      ranked: true,
+    }) + here
+  );
+}
+
+/** A closing line with the matches in this session, or nothing when it holds none. */
+async function thisSession(file: string, query: string): Promise<string> {
+  try {
+    const count = countMatches(await readEntries(file), query);
+    if (count === 0) return '';
+    return `\nAlso in this session: ${count} match${count === 1 ? '' : 'es'}; query: "${oneLine(query, 100)}" shows ${count === 1 ? 'it' : 'them'}.`;
+  } catch {
+    return '';
+  }
 }
 
 /** The transcript of the session whose id starts with `id` (8 characters at least), in any project. */

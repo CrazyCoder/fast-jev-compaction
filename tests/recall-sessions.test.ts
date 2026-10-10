@@ -111,6 +111,15 @@ describe('recall across sessions', () => {
     expect(out).toMatch(/Read 1 of 2 matching sessions before the time ran out/);
   });
 
+  it('counts the matches in this session too, which it leaves out of the results', async () => {
+    const dir = config();
+    expect(await ask(dir, { sessions: 'jscpd', project: 'all' })).toMatch(
+      /\nAlso in this session: 1 match; query: "jscpd" shows it\.$/,
+    );
+    // Searching another project only does not look here.
+    expect(await ask(dir, { sessions: 'jscpd', project: 'billing-api' })).not.toMatch(/Also in this session/);
+  });
+
   it('answers from the scan when the session index throws', async () => {
     const dir = config();
     const current = join(dir, 'projects', 'C--work-app', `${CURRENT}.jsonl`);

@@ -30,7 +30,7 @@ export const RECALL_DESCRIPTION = [
   '- range: [from, to]: entries #from..#to in order, one line each.',
   '- touched: true for the files changed in this session and the calls that changed them; a part of a path for every call on the files it matches, reads included.',
   'Add page for more query, range or touched results, and offset to continue a long expand.',
-  '- sessions: keywords searched in the other sessions of this project; with project: "<part of its folder or path>" in another project, or project: "all" in every one. Each hit names its session id.',
+  '- sessions: keywords searched in the other sessions of this project; with project: "<part of its folder or path>" in another project, or project: "all" in every one. Each hit names its session id; a last line counts the matches in this session, which query searches.',
   'session: "<id>" runs query, expand, range or touched on that session instead of this one.',
   'Subagents keep their own transcripts: agent: "list" names them; agent: "<id or part of its name>" runs the request on one, agent: "all" on the session and all of them. expand finds a subagent call by its tool_use_id without it.',
   'A compaction note names the tool_use_id to expand. A tool_use_id always names the same call; #N can shift as the session grows.',
