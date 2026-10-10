@@ -7,7 +7,23 @@ accordingly, host notices are trimmed, and old prose can be condensed into a
 digest.
 
 This is the CrazyCoder fork. It combines the most useful work from the upstream
-project's many forks; see [Features and credits](#features-and-credits).
+project's many forks; the full lineage is under
+[Features and credits](#features-and-credits).
+
+## Added in this fork
+
+| Feature | What it does | Origin |
+| -- | -- | -- |
+| Quiet output | Diagnostics, including the per-call decisions, go to the debug log only; you see one short toast instead of a wall of text in the transcript | k-metehan (6bb138d) |
+| Compaction log file | Each outcome, and each `/compact` queued in a headless session, is one line in `~/.claude/fast-jev-compaction/compactions.log` (newest 200), since the desktop app has no `--debug` | k-metehan (aa912a9) |
+| Hidden content folded back | Kept messages go back without their engine handles so `--resume` starts at the compaction ([#89](https://github.com/tamaratran/fast-jev-compaction/issues/89)). That drops what Claude Code keeps beside each message: skill bodies, prompts typed while a tool ran, attachments, images, ToolSearch-loaded tools. The hook reads them from the conversation's API form and folds them back as text (placeholders for images and deferred tools), counted in the size guards | This fork. k-metehan identified the loss and keeps handles instead, which brings #89 back |
+| Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
+| `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
+| OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction) (235a6c6) |
+| Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
+
+k-metehan is
+[k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction).
 
 On a replay of real sessions, `oldProse: digest` with `recentTurns: 8` versus
 the default `keep` took the post-compaction floor from about 155k to about 39k
@@ -120,19 +136,8 @@ Lineage:
 [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction)
 and
 [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction).
-Thanks to all of them, and to the authors of the upstream PRs linked below.
-
-### Added in this fork
-
-| Feature | What it does | Origin |
-| -- | -- | -- |
-| Quiet output | Diagnostics, including the per-call decisions, go to the debug log only; you see one short toast instead of a wall of text in the transcript | k-metehan (6bb138d) |
-| Compaction log file | Each outcome, and each `/compact` queued in a headless session, is one line in `~/.claude/fast-jev-compaction/compactions.log` (newest 200), since the desktop app has no `--debug` | k-metehan (aa912a9) |
-| Hidden content folded back | Kept messages go back without their engine handles so `--resume` starts at the compaction ([#89](https://github.com/tamaratran/fast-jev-compaction/issues/89)). That drops what Claude Code keeps beside each message: skill bodies, prompts typed while a tool ran, attachments, images, ToolSearch-loaded tools. The hook reads them from the conversation's API form and folds them back as text (placeholders for images and deferred tools), counted in the size guards | This fork. k-metehan identified the loss and keeps handles instead, which brings #89 back |
-| Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
-| `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
-| OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | deadczarvc-labs/jev-factkeep-compaction (235a6c6) |
-| Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
+Thanks to all of them, and to the authors of the upstream PRs linked below. What
+this fork adds is listed under [Added in this fork](#added-in-this-fork).
 
 ### Inherited from QuanticPotatoes and ferrisworks
 
