@@ -9,10 +9,20 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
 
 ### Added
 
+- `recall` (default on): each compaction first archives the rows it receives,
+  full tool results included, under
+  `<config dir>/fast-jev-compaction/recall/<session>/`, and the model gets a
+  `recall` tool (`mcp__fast-jev-compaction__recall`) with `query` (BM25 or
+  regex), `expand` (by `#N` or tool_use_id, saved large outputs included) and
+  `range`, in answers of at most 48k characters. Cut notes name the recall call
+  instead of "re-run the tool" (`recallNotes` in the library). Archives
+  untouched for 30 days are emptied.
+
 - Each compaction outcome, and each `/compact` queued in a headless session, is
   appended as one line to
   `<CLAUDE_CONFIG_DIR or ~/.claude>/fast-jev-compaction/compactions.log` (newest
   200 lines).
+
 - Hidden content (skill bodies, prompts typed while a tool ran, attachments,
   images and ToolSearch-loaded tools) is read from the conversation's API form
   and folded back as text into the handle-stripped rows; images and deferred
@@ -21,11 +31,14 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
   task-tool nudge, deferred tool list, MCP instructions, editor diagnostics,
   file-changed notes) are skipped, and removed from rows an earlier compaction
   folded them into.
+
 - `maxConcurrentRequests` (default 4); a 429 or 5xx is retried once after 1 s;
   no further request starts after a 401, 403 or no answer; the calls of a
   request that still failed are kept and counted in `stats.requestsFailed`.
+
 - `/compact <instructions>` reach Jev's goal (`instructions` option, capped at
   2000 characters).
+
 - `provider: "openai"`: OpenAI's Decisions API (`gpt-6-luna`, key from
   `OPENAI_API_KEY`) instead of Jev. Jev stays the default.
 

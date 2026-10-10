@@ -20,6 +20,7 @@ project's many forks; the full lineage is under
 | Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
 | `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
 | OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction) (235a6c6) |
+| Recall tool | Each compaction first saves what it receives, full tool results included, under `~/.claude/fast-jev-compaction/recall/<session>/`. The model gets a `recall` tool to search that archive and the live conversation (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, following outputs Claude Code saved to a file), or list them (`range`), in answers of at most 48k characters. Cut notes name the call that gets the rest instead of "re-run the tool". `recall: false` turns it off | Ranking and regex guard from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); archive and notes: this fork |
 | Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
 
 k-metehan is
@@ -208,13 +209,11 @@ this fork adds is listed under [Added in this fork](#added-in-this-fork).
 | Hidden content after compaction | Kept on untouched rows (`--resume` reloads the old history) | Lost (no handles) | Lost | Folded back as text |
 | Failed Jev request | Whole compaction falls back | Same | Same | Its calls kept, rest applied |
 | Decision provider | Jev | Jev (any System One endpoint) | Same | Same + OpenAI Decisions |
+| What was cut | Gone from the conversation | Same | Same | Archived; `recall` tool reads it back |
 | CI and releases | No | No | Yes | Yes |
 
-Roadmap: a `session_recall` tool that searches the current transcript (which
-compaction never deletes) so the model can fetch a dropped tool result back,
-adapted from [pi-vcc](https://github.com/sting8k/pi-vcc) and
-[pi-blackhole](https://github.com/k0valik/pi-blackhole); fact salvage on dropped
-calls (upstream issues
+Roadmap: recall of the files a session touched, of subagent transcripts, and
+across sessions; fact salvage on dropped calls (upstream issues
 [#118](https://github.com/tamaratran/fast-jev-compaction/issues/118),
 [#105](https://github.com/tamaratran/fast-jev-compaction/issues/105)).
 

@@ -54,6 +54,7 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 | Option | Default |
 | -- | -: |
 | `provider` | `jev` (`openai`) |
+| `recall` | `true` |
 | `model` | `jev-latest` (`gpt-6-luna` with `openai`) |
 | `keepMode` | `rank` |
 | `keepThreshold` | `0.5` (threshold mode only) |
@@ -176,6 +177,35 @@ exercise the deadline through Claude Code's actual hook dispatcher and a virtual
 clock. The tests use synthetic messages and mocked HTTP responses and make no
 model requests. `npm test` continues to run the fast library and adapter tests
 without a Claude CLI.
+
+## Recall
+
+With `recall` on (the default), the `session.compact` hook first saves the rows
+it receives, full tool results included, to
+`<config dir>/fast-jev-compaction/recall/<session>/`: one group of chunk files
+per compaction, each under the 4 MiB `$.fs.read` takes, holding only rows no
+earlier group has. Hooks cannot read the session transcript itself: it often
+runs past 4 MiB, and hooks have no Node file access. At `session.start` the
+plugin registers `recall` with `$.tool.register`; the model calls it as
+`mcp__fast-jev-compaction__recall` (a deferred tool, loaded through ToolSearch),
+and a `tool.call` hook answers from the archive followed by the live rows, so a
+call keeps its uncut result:
+
+- `query`: keywords ranked by BM25, or a regex when the query holds regex
+  characters (a nested quantifier is matched as literal text); 5 hits per page,
+  each with the lines around its first match.
+- `expand`: entries in full by `#N` or tool_use_id; a call shows its input and
+  its result, or the file Claude Code saved a large output to. Long text is cut
+  at a line end with an `offset` to continue from.
+- `range`: entries `#from..#to`, one line each, 20 per page.
+
+An answer holds at most 48,000 characters, shared between expanded entries.
+Recall's own calls are not listed. Cut notes end with
+`full text: recall expand ["<tool_use_id>"]` instead of telling the model to run
+the tool again. `$.fs` cannot delete, so the chunks of a session untouched for
+30 days are emptied at the next session start. The ranking and regex guard are
+adapted from [pi-vcc](https://github.com/sting8k/pi-vcc), the answer budget from
+[pi-blackhole](https://github.com/k0valik/pi-blackhole) (both MIT).
 
 ## Scope and caveat
 
