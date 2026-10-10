@@ -57,6 +57,9 @@ QuanticPotatoes 0.8.0. The plugin id is `jetcompact`; its markers, data folder
 
 ### Changed
 
+- Releases are made by pushing a version tag (`v0.10.0`); a push to `main` no
+  longer releases. The Release workflow checks that the tag matches every
+  declared version before publishing.
 - Diagnostics (outcome line, per-call decisions, redaction count, skipped
   auto-compacts) go to the debug log only; the user sees one short toast.
 - Type reference from Claude Code 2.1.292.

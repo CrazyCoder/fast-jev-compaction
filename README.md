@@ -366,6 +366,27 @@ npm run validate:plugin  # claude plugin validate
 TYPESAFE_API_KEY="$(cat ~/.typesafe_key)" npm run demo   # live network check
 ```
 
+### Releasing
+
+A push to `main` never makes a release. To release a version:
+
+1. Set the new version in `.claude-plugin/plugin.json`,
+   `.claude-plugin/marketplace.json`, `package.json` and `package-lock.json`;
+   `npm run check:version` confirms they agree.
+2. Add its `## [x.y.z]` section to `CHANGELOG.md`, and commit.
+3. Tag the commit and push the tag:
+
+```sh
+git tag v0.10.0
+git push origin main v0.10.0
+```
+
+The Release workflow then checks that the tag matches every declared version and
+publishes a GitHub release with the tag's CHANGELOG section as its notes. It
+fails, and publishes nothing, when they disagree or the section is missing.
+Installed plugins update from the version on `main`, not from the release, so
+push the version bump only when it is ready to ship.
+
 `demo/JevDemo` is a native SwiftUI app (macOS) that plays a scripted, dramatized
 compaction for screen recording; it never calls the API. `demo/JevDemo/build.sh`
 builds and launches it; space replays.

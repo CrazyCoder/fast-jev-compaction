@@ -1,8 +1,10 @@
 name: Release
 
+# A release is made by pushing a version tag (`git push origin v0.10.0`); see
+# "Releasing" in the README. Pushes to main never release.
 on:
   push:
-    branches: [main]
+    tags: ['v*']
 
 concurrency:
   group: release
@@ -15,19 +17,21 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Tag and publish a release for a new version
+      - name: Check the tag matches every declared version
+        run: |
+          set -euo pipefail
+          node scripts/check-version.mjs
+          version=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(".claude-plugin/plugin.json","utf8")).version)')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in plugin.json"
+            exit 1
+          fi
+      - name: Publish the release with its CHANGELOG section
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          version=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(".claude-plugin/plugin.json","utf8")).version)')
-          tag="v$version"
-
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "Tag $tag already exists; nothing to do."
-            exit 0
-          fi
-
+          version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '
             $0 ~ "^## \\[" v "\\]" { found = 1; next }
             found && /^## / { exit }
@@ -37,5 +41,4 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $version"
             exit 1
           fi
-
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes-file release-notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
