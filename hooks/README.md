@@ -275,7 +275,7 @@ to, and never on every prompt:
   not change, so the prompt cache keeps it.
 - **Each cut note** names the call that returns the rest:
   `full text: recall expand ["<tool_use_id>"]`.
-- **A digest header** ends with
+- **A digest or summary header** ends with
   `the recall tool reads them back from the transcript (query, expand)`.
 - **One compaction note** opens the compacted history: a user message starting
   `[fast-jev-compaction note]` that says what this compaction cut (results cut

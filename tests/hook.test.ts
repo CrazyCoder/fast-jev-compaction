@@ -784,7 +784,9 @@ describe('old prose through the hook', () => {
     });
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ model: 'sonnet', maxTokens: 3000 });
-    expect(withoutCompactionNote(out.messages)[0]!.text).toBe('[fast-jev-compaction summary of 9 earlier turns]\nMODEL SUMMARY');
+    expect(withoutCompactionNote(out.messages)[0]!.text).toBe(
+      '[fast-jev-compaction summary of 9 earlier turns; the recall tool reads them back from the transcript (query, expand)]\nMODEL SUMMARY',
+    );
   });
 
   it('summarize falls back to the digest when the model does not answer', async () => {

@@ -201,6 +201,15 @@ describe('condenseOldProse', () => {
     expect(prompts[1]).toContain('SUMMARY TEXT');
     expect(parseCondensed(second.messages[0]!)!.turns).toBe(8);
     expect(second.messages.filter((m) => parseCondensed(m))).toHaveLength(1);
+    expect(first.messages[0]!.text.split('\n')[0]).toBe('[fast-jev-compaction summary of 6 earlier turns]');
+  });
+
+  it('names the recall tool in a summary header when recall is on, and still reads as a summary', async () => {
+    const recalled = await condenseOldProse(history(10), { oldProse: 'summarize', recentTurns: 4, recallNotes: true }, async () => 'S');
+    expect(recalled.messages[0]!.text).toBe(
+      '[fast-jev-compaction summary of 6 earlier turns; the recall tool reads them back from the transcript (query, expand)]\nS',
+    );
+    expect(parseCondensed(recalled.messages[0]!)).toMatchObject({ kind: 'summary', turns: 6, body: 'S' });
   });
 
   it('summarize falls back to the digest without a summarizer, on failure or an empty reply', async () => {

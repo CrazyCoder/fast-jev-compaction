@@ -215,6 +215,9 @@ function priorOf(old: readonly Message[]): PriorDigest {
   return prior;
 }
 
+/** Ends a digest or summary header when the host offers the recall tool. */
+const RECALL_HINT = '; the recall tool reads them back from the transcript (query, expand)';
+
 export interface DigestOptions {
   maxChars?: number;
   /** Say in the header that the recall tool reads the dropped turns back. */
@@ -240,7 +243,7 @@ export function buildDigest(old: readonly Message[], options: DigestOptions = {}
   const merged = [...new Set([...references, ...prior.references])].slice(0, MAX_REFERENCES);
   const footer = merged.length > 0 ? `${REFERENCED}${merged.join(', ')}` : '';
   const header = `[fast-jev-compaction digest of ${totalTurns} earlier turns; tool calls, results and intermediate narration were dropped${
-    options.recall ? '; the recall tool reads them back from the transcript (query, expand)' : ''
+    options.recall ? RECALL_HINT : ''
   }]`;
 
   const [first = '', ...rest] = entries;
@@ -309,7 +312,7 @@ export type ProseSummarizer = (request: {
 export interface OldProseOptions {
   oldProse: OldProseMode;
   recentTurns: number;
-  /** The digest header points at the recall tool. */
+  /** The digest or summary header points at the recall tool. */
   recallNotes?: boolean;
 }
 
@@ -363,7 +366,7 @@ export async function condenseOldProse(
       ).trim();
       if (reply) {
         const turns = priorOf(split.old).turns + groupTurns(split.old).length;
-        text = `[fast-jev-compaction summary of ${turns} earlier turns]\n${reply}`;
+        text = `[fast-jev-compaction summary of ${turns} earlier turns${options.recallNotes === true ? RECALL_HINT : ''}]\n${reply}`;
         applied = 'summarize';
       }
     } catch {
