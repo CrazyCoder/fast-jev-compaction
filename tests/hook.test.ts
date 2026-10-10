@@ -508,14 +508,22 @@ function hooks(options: Record<string, unknown> = {}): Record<string, Hook> {
 
 function host(fetch: ReturnType<typeof jevFetch>) {
   const notices: string[] = [];
+  const sinks: (string | undefined)[] = [];
+  const toasts: string[] = [];
   const $ = {
     env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
     settings: { read: async () => ({}) },
     http: { fetch },
     clock: { sleep: () => new Promise<void>(() => {}) },
-    ui: { log: (text: string) => notices.push(text), toast: () => {} },
+    ui: {
+      log: (text: string, options?: { to?: string }) => {
+        notices.push(text);
+        sinks.push(options?.to);
+      },
+      toast: (text: string) => toasts.push(text),
+    },
   };
-  return { $, notices };
+  return { $, notices, sinks, toasts };
 }
 
 const CORE = { messages: ['built-in summary'] };
@@ -525,7 +533,7 @@ async function compactWith(
   fetch: ReturnType<typeof jevFetch>,
   options: Record<string, unknown> = {},
 ) {
-  const { $, notices } = host(fetch);
+  const { $, notices, sinks, toasts } = host(fetch);
   let delegated = false;
   const out = await hooks({ preserveRecentMessages: 1, ...options })['session.compact']!(
     $,
@@ -535,8 +543,27 @@ async function compactWith(
       return CORE;
     },
   );
-  return { out, delegated, notices };
+  return { out, delegated, notices, sinks, toasts };
 }
+
+describe('compaction output on screen', () => {
+  it('sends every log line to the debug log and shows one short toast', async () => {
+    const cases = [
+      { trigger: 'manual', fetch: jevFetch(() => 0.1), toast: /^fast-jev: compacted, \d+% smaller \(\d+\/7 messages\)$/ },
+      { trigger: 'manual', fetch: jevFetch(() => 0.9), toast: /^fast-jev: not compacted \(below 25% minimum\)$/ },
+      { trigger: 'auto', fetch: jevFetch(() => 0.9), toast: /^fast-jev: built-in summary \(below 25% minimum\)$/ },
+      { trigger: 'auto', fetch: failing, toast: /^fast-jev: built-in summary \(.*500.*\)$/ },
+    ];
+    for (const c of cases) {
+      const { notices, sinks, toasts } = await compactWith(c.trigger, c.fetch, { keepMode: 'threshold', dropCalls: true });
+      expect(notices.some((line) => line.startsWith('decisions'))).toBe(c.fetch !== failing);
+      expect(sinks.every((to) => to === 'debug')).toBe(true);
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0]).toMatch(c.toast);
+      expect(toasts[0]!.length).toBeLessThanOrEqual(120);
+    }
+  });
+});
 
 const failing = async () => ({ status: 500, ok: false, text: 'upstream error' });
 

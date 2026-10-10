@@ -102,9 +102,10 @@ shrink) logs a fallback and delegates to Claude Code's built-in compaction;
 `turn.complete` one) and `precompute` answer `{ skip }` instead, so the
 conversation stays as it is and Claude Code shows why. `always` delegates on
 every trigger, as the plugin did before the option existed; `never` on none.
-The outcome is shown as a toast and logged with the
-reduction, per-reason counts, state size and request count; a per-call
-`decisions:` line with both probabilities is logged for diagnosis. The
+The outcome is shown as a one-line toast. The debug log (`$.ui.log` with
+`to: 'debug'`, nothing in the transcript) gets the reduction, per-reason
+counts, state size and request count, and a per-call `decisions:` line with
+both probabilities for diagnosis. The
 `turn.complete` hook requests
 compaction when `context.percent` reaches `compactAtPercent`, with an
 in-flight guard. When that request is skipped, the hook waits until the
@@ -113,7 +114,7 @@ context has grown by another 10 percentage points, or dropped below
 desktop app's Code tab, `claude -p`) refuse `$.session.compact`, so there the
 hook queues `/compact` for when the turn is over and applies the same wait,
 since a queued compaction's outcome does not come back to it. Toasts are not
-shown in those sessions; the outcome is only in the log.
+shown in those sessions; the outcome is only in the debug log.
 
 `targetPercent` guards against a post-compaction floor that rises each time,
 because all message text is kept verbatim. The hook estimates the context

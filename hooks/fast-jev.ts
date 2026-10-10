@@ -458,17 +458,29 @@ export async function getApiKey(
   return undefined;
 }
 
+type UiLog = { ui: { log: (text: string, options?: { to?: 'debug' }) => void } };
+
+/** Diagnostics go to the debug log (`claude --debug`) only, never the transcript. */
+function debugLog($: UiLog, text: string): void {
+  $.ui.log(text, { to: 'debug' });
+}
+
+const TOAST_REASON_CHARS = 80;
+
+/** One short toast per compaction; the details are in the debug log. */
 function notify(
-  $: {
-    ui: {
-      log: (text: string) => void;
-      toast: (text: string, options?: { timeoutMs?: number }) => void;
-    };
-  },
-  text: string,
+  $: UiLog & { ui: { toast: (text: string, options?: { timeoutMs?: number }) => void } },
+  detail: string,
+  toast: string,
 ): void {
-  $.ui.log(text);
-  $.ui.toast(text, { timeoutMs: 15_000 });
+  debugLog($, detail);
+  $.ui.toast(`fast-jev: ${toast}`, { timeoutMs: 8_000 });
+}
+
+/** The head of a fallback reason, before its `: details` part, for a toast. */
+function toastReason(why: string): string {
+  const head = why.split(': ')[0]!;
+  return head.length > TOAST_REASON_CHARS ? `${head.slice(0, TOAST_REASON_CHARS - 1)}…` : head;
 }
 
 /** The host's refusal of `$.session.compact` in a headless (-p / SDK) session. */
@@ -489,10 +501,10 @@ export const register: Register = (on: On, options: PluginOptions) => {
 
     const giveUp = (why: string) => {
       if (mayUseBuiltin(event.trigger, configured.builtinFallback)) {
-        notify($, `fallback to built-in summary (${why})`);
+        notify($, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
         return next(event);
       }
-      notify($, `not compacted, no built-in summary (${why})`);
+      notify($, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
       const reason = why.length > 200 ? `${why.slice(0, 200)}…` : why;
       return { skip: `fast-jev-compaction: ${reason}; conversation left as it is` };
     };
@@ -520,8 +532,8 @@ export const register: Register = (on: On, options: PluginOptions) => {
         config.compactionTimeoutMs,
         (ms, options) => $.clock.sleep(ms, options),
       );
-      $.ui.log(`redacted ${redacted} secret-shaped value(s) from the Jev request`);
-      for (const line of decisionLogLines(result)) $.ui.log(line);
+      debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
+      for (const line of decisionLogLines(result)) debugLog($, line);
       if (reductionRatio(result) < config.minReductionRatio) {
         return giveUp(`below ${percent(config.minReductionRatio)} minimum: ${summarize(result)}`);
       }
@@ -540,6 +552,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
       notify(
         $,
         `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})`,
+        `compacted, ${percent(reductionRatio(result))} smaller (${messages.length}/${event.messages.length} messages)`,
       );
       return { messages: withoutHandles(messages) };
     } catch (error) {
@@ -570,13 +583,11 @@ export const register: Register = (on: On, options: PluginOptions) => {
         // that worked brings usage under compactAtPercent, which clears the wait.
         retryAtPercent = used + RETRY_AFTER_SKIP_PERCENT;
         void $.command.run({ command: 'compact' }).catch((queued: unknown) =>
-          $.ui.log(`auto-compact skipped (${queued instanceof Error ? queued.message : String(queued)})`),
+          debugLog($, `auto-compact skipped (${queued instanceof Error ? queued.message : String(queued)})`),
         );
         return next(event);
       }
-      $.ui.log(
-        `auto-compact skipped (${error instanceof Error ? error.message : String(error)})`,
-      );
+      debugLog($, `auto-compact skipped (${error instanceof Error ? error.message : String(error)})`);
     } finally {
       compacting = false;
     }
