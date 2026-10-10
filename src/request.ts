@@ -25,7 +25,7 @@ const ESCAPED_LONE_SURROGATE =
  * `state.ts` already avoid splitting surrogate pairs; this covers lone
  * surrogates that arrive from anywhere else (e.g. raw tool output).
  */
-function wellFormedJson(json: string): string {
+export function wellFormedJson(json: string): string {
   return json.replace(ESCAPED_LONE_SURROGATE, '\\ufffd');
 }
 

@@ -4,10 +4,16 @@
   "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
   "license": "MIT",
   "userConfig": {
+    "provider": {
+      "type": "string",
+      "title": "Decision provider",
+      "description": "jev (TypeSafe Jev, default) or openai (OpenAI Decisions API, gpt-6-luna; key from OPENAI_API_KEY).",
+      "default": "jev"
+    },
     "apiKey": {
       "type": "string",
-      "title": "TypeSafe API key",
-      "description": "TypeSafe API key. Leave unset to use TYPESAFE_API_KEY, OPENROUTER_API_KEY or envFile.",
+      "title": "API key",
+      "description": "Key for the provider. Leave unset to use TYPESAFE_API_KEY or OPENROUTER_API_KEY (jev), OPENAI_API_KEY (openai), or envFile.",
       "sensitive": true
     },
     "baseUrl": {
@@ -150,8 +156,8 @@
     },
     "model": {
       "type": "string",
-      "title": "Jev model",
-      "description": "TypeSafe Jev model name.",
+      "title": "Model",
+      "description": "Model name for the provider; with provider openai a jev name is replaced by gpt-6-luna.",
       "default": "jev-latest"
     }
   },

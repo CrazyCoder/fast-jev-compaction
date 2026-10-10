@@ -52,6 +52,8 @@ The plugin declares these `userConfig` values in
 
 | Option | Default |
 | --- | ---: |
+| `provider` | `jev` (`openai`) |
+| `model` | `jev-latest` (`gpt-6-luna` with `openai`) |
 | `keepMode` | `rank` |
 | `keepThreshold` | `0.5` (threshold mode only) |
 | `keepResultTokens` | `12000` |
@@ -73,8 +75,7 @@ The plugin declares these `userConfig` values in
 | `recentTurns` | `8` |
 | `proseModel` | `haiku` (`summarize` only) |
 | `taskResultHeadChars` | `4000` |
-| `model` | `jev-latest` |
-| `baseUrl` | the TypeSafe endpoint |
+| `baseUrl` | the provider's endpoint |
 | `envFile` | unset |
 
 The key can be supplied as the sensitive `apiKey` plugin option, or through
@@ -82,6 +83,13 @@ The key can be supplied as the sensitive `apiKey` plugin option, or through
 settings' `env` block, or in the dotenv file `envFile` names. The environment
 variable is the recommended development setup; `envFile` is for a key that
 should not sit in a settings file.
+
+`provider: "openai"` sends the same questions to OpenAI's Decisions API
+(`https://api.openai.com/v1/decisions`, `gpt-6-luna`) instead of Jev: the
+state goes as the text `input`, each question as a named `predicate`, and the
+key comes from `OPENAI_API_KEY` (environment, settings `env`, or `envFile`).
+A refusal keeps the call. Luna's probabilities are on a different scale from
+Jev's, so `keepThreshold` and the rank budgets may need retuning.
 
 `baseUrl` is unset by default, which reaches
 `https://api.typesafe.ai/v1/systemone` as before. Set it to

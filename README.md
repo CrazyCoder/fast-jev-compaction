@@ -68,6 +68,7 @@ people touch:
 | `minReductionRatio` | `0.25` | Minimum estimated reduction required to replace the history |
 | `keepMode` | `rank` | `rank` keeps the best-scored calls within `keepResultTokens` / `keepCallTokens`; `threshold` uses `keepThreshold` |
 | `preserveRecentMessages` | `6` | Newest messages never touched |
+| `provider` | `jev` | Who scores the calls: `jev` (TypeSafe Jev) or `openai` ([OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions), `gpt-6-luna`, key from `OPENAI_API_KEY`). Luna's probabilities are on a different scale from Jev's, so `keepThreshold` and the rank budgets may need retuning |
 
 Every option, with its default, is listed in [hooks/README.md](hooks/README.md#configuration).
 

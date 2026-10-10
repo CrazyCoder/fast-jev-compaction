@@ -94,6 +94,7 @@ function jevFetch(answer: (name: string) => number, bodies: string[] = []) {
 describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
     expect(resolveHookConfig({})).toEqual({
+      provider: 'jev',
       compactAtPercent: 60,
       minReductionRatio: 0.25,
       targetPercent: 45,
@@ -113,6 +114,7 @@ describe('hook config', () => {
         builtinFallback: 'sometimes',
       }),
     ).toEqual({
+      provider: 'jev',
       apiKey: 'k',
       keepThreshold: 0.3,
       maxStateTokens: 1000,

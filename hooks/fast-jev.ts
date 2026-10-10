@@ -11,8 +11,9 @@ import type {
 import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
-import { buildJevRequest, DEFAULT_MODEL, JevTransportError, parseJevResponse } from '../src/request.js';
+import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
 import { foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
+import { DECISIONS_MODEL, wireFor, type JevProvider } from '../src/decisions.js';
 import type { ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
@@ -63,6 +64,8 @@ export type HookFetchResponse = {
 export type HookFetch = (url: string, init?: HookFetchInit) => Promise<HookFetchResponse>;
 
 export type HookConfig = CompactOptions & {
+  /** Who scores the calls: `jev` (default) or `openai` (OpenAI's Decisions API). */
+  provider: JevProvider;
   apiKey?: string;
   /** Jev endpoint; unset reaches TypeSafe directly, as the library defaults to. */
   baseUrl?: string;
@@ -108,8 +111,15 @@ export function mayUseBuiltin(trigger: string | undefined, mode: BuiltinFallback
   return trigger === 'auto';
 }
 
+/** The model to ask: the configured one, else the provider's; a Jev name never goes to OpenAI. */
+function providerModel(provider: JevProvider, configured: string | undefined): string {
+  if (provider === 'openai') return configured && !configured.startsWith('jev') ? configured : DECISIONS_MODEL;
+  return configured ?? HOOK_DEFAULTS.model;
+}
+
 /** Reads the plugin's `userConfig` values; anything missing takes the defaults. */
 export function resolveHookConfig(options: PluginOptions): HookConfig {
+  const provider: JevProvider = options['provider'] === 'openai' ? 'openai' : 'jev';
   const numbers: Partial<Omit<CompactOptions, 'goal'>> = {};
   for (const key of [
     'keepThreshold',
@@ -150,7 +160,8 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
       HOOK_DEFAULTS.minReductionRatio,
     ),
     targetPercent: optionNumber(options, 'targetPercent', HOOK_DEFAULTS.targetPercent),
-    model: optionString(options, 'model') ?? HOOK_DEFAULTS.model,
+    provider,
+    model: providerModel(provider, optionString(options, 'model')),
     compactionTimeoutMs: optionNumber(options, 'compactionTimeoutMs', HOOK_DEFAULTS.compactionTimeoutMs),
     builtinFallback: optionFallback(options),
     proseModel: optionString(options, 'proseModel') ?? HOOK_DEFAULTS.proseModel,
@@ -174,13 +185,15 @@ export function jevAsker(
   model: string,
   baseUrl?: string,
   onRedact: (count: number) => void = () => {},
+  provider: JevProvider = 'jev',
 ): JevAsker {
+  const wire = wireFor(provider);
   return {
     async ask(state, questions) {
       const safeState = redactDeep(state, [apiKey]);
       const safeQuestions = redactDeep(questions, [apiKey]);
       onRedact(safeState.count + safeQuestions.count);
-      const request = buildJevRequest(
+      const request = wire.build(
         { apiKey, model, baseUrl },
         safeState.value,
         safeQuestions.value,
@@ -195,7 +208,7 @@ export function jevAsker(
       } catch (error) {
         throw new JevTransportError(error);
       }
-      return parseJevResponse(response.status, response.ok, response.text);
+      return wire.parse(response.status, response.ok, response.text);
     },
   };
 }
@@ -268,10 +281,10 @@ export async function compactSession(
   summarize?: ProseSummarizer,
   sleep?: (ms: number) => Promise<void>,
 ): Promise<SessionCompaction> {
-  if (!config.apiKey) throw new Error('TYPESAFE_API_KEY is not configured');
+  if (!config.apiKey) throw new Error(`${wireFor(config.provider).keyName} is not configured`);
   const result = await compact(
     messages,
-    jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl, onRedact),
+    jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl, onRedact, config.provider),
     config,
     { summarize, sleep },
   );
@@ -415,7 +428,11 @@ export function decisionLogLines(
 }
 
 /** The names a key may be stored under, in the order they are tried. */
-const KEY_NAMES = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY'] as const;
+/** The variables a provider's key is read from, in order. */
+const KEY_NAMES: Record<JevProvider, readonly string[]> = {
+  jev: ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY'],
+  openai: ['OPENAI_API_KEY'],
+};
 
 function settingEnv(settings: Readonly<Record<string, unknown>>, name: string): string | undefined {
   const env = settings['env'];
@@ -432,10 +449,11 @@ function settingEnv(settings: Readonly<Record<string, unknown>>, name: string): 
 export async function dotenvKey(
   $: { fs: { read: (path: string) => Promise<string> } },
   path: string,
+  provider: JevProvider = 'jev',
 ): Promise<string | undefined> {
   try {
     const parsed = parseEnv(await $.fs.read(path));
-    for (const name of KEY_NAMES) {
+    for (const name of KEY_NAMES[provider]) {
       const value = parsed[name];
       if (value) return value;
     }
@@ -456,16 +474,21 @@ export async function getApiKey(
   if (config.apiKey) return config.apiKey;
   // The names are spelled literally: `claude plugin validate` reads them off
   // this source, and a name it cannot see is refused.
-  const fromEnv = await $.env.get('TYPESAFE_API_KEY');
-  if (fromEnv) return fromEnv;
-  const fromOpenRouter = await $.env.get('OPENROUTER_API_KEY');
-  if (fromOpenRouter) return fromOpenRouter;
+  if (config.provider === 'openai') {
+    const fromOpenAi = await $.env.get('OPENAI_API_KEY');
+    if (fromOpenAi) return fromOpenAi;
+  } else {
+    const fromEnv = await $.env.get('TYPESAFE_API_KEY');
+    if (fromEnv) return fromEnv;
+    const fromOpenRouter = await $.env.get('OPENROUTER_API_KEY');
+    if (fromOpenRouter) return fromOpenRouter;
+  }
   const settings = await $.settings.read();
-  for (const name of KEY_NAMES) {
+  for (const name of KEY_NAMES[config.provider]) {
     const value = settingEnv(settings, name);
     if (value) return value;
   }
-  if (config.envFile) return dotenvKey($, config.envFile);
+  if (config.envFile) return dotenvKey($, config.envFile, config.provider);
   return undefined;
 }
 
