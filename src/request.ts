@@ -56,6 +56,38 @@ export function buildJevRequest(
   };
 }
 
+/** A Jev request answered with an HTTP error status. */
+export class JevRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, detail: string) {
+    super(`Jev request failed (${status}): ${detail}`);
+    this.name = 'JevRequestError';
+    this.status = status;
+  }
+}
+
+/** A Jev request that got no answer: the connection failed or timed out. */
+export class JevTransportError extends Error {
+  constructor(cause: unknown) {
+    super(`Jev request got no answer: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'JevTransportError';
+  }
+}
+
+/** Worth one more try: rate limited (429) or a server error (5xx). */
+export function isRetryable(error: unknown): boolean {
+  return error instanceof JevRequestError && (error.status === 429 || error.status >= 500);
+}
+
+/** Every other request would fail the same way: unauthorized (401, 403) or no answer at all. */
+export function stopsAll(error: unknown): boolean {
+  return (
+    error instanceof JevTransportError ||
+    (error instanceof JevRequestError && (error.status === 401 || error.status === 403))
+  );
+}
+
 /** Validates a Jev response body; throws on anything but an `answers` object. */
 export function parseJevResponse(
   status: number,
@@ -63,7 +95,7 @@ export function parseJevResponse(
   text: string,
 ): JevResponse {
   if (!ok) {
-    throw new Error(`Jev request failed (${status}): ${text.slice(0, 200)}`);
+    throw new JevRequestError(status, text.slice(0, 200));
   }
   let parsed: unknown;
   try {

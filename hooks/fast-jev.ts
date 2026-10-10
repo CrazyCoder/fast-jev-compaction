@@ -11,7 +11,7 @@ import type {
 import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
-import { buildJevRequest, DEFAULT_MODEL, parseJevResponse } from '../src/request.js';
+import { buildJevRequest, DEFAULT_MODEL, JevTransportError, parseJevResponse } from '../src/request.js';
 import type { ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
@@ -117,6 +117,7 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     'preserveRecentMessages',
     'maxStateTokens',
     'maxRequestTokens',
+    'maxConcurrentRequests',
     'truncateHeadChars',
     'hostTextHeadChars',
     'taskResultHeadChars',
@@ -183,11 +184,16 @@ export function jevAsker(
         safeState.value,
         safeQuestions.value,
       );
-      const response = await fetchFn(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: request.body,
-      });
+      let response: HookFetchResponse;
+      try {
+        response = await fetchFn(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+        });
+      } catch (error) {
+        throw new JevTransportError(error);
+      }
       return parseJevResponse(response.status, response.ok, response.text);
     },
   };
@@ -259,13 +265,14 @@ export async function compactSession(
   fetchFn: HookFetch,
   onRedact?: (count: number) => void,
   summarize?: ProseSummarizer,
+  sleep?: (ms: number) => Promise<void>,
 ): Promise<SessionCompaction> {
   if (!config.apiKey) throw new Error('TYPESAFE_API_KEY is not configured');
   const result = await compact(
     messages,
     jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl, onRedact),
     config,
-    { summarize },
+    { summarize, sleep },
   );
   return { result, messages: toSessionMessages(messages, result.messages) };
 }
@@ -346,7 +353,9 @@ export function summarize(result: CompactResult): string {
   ].filter(Boolean);
   return `${percent(reductionRatio(result))} reduction; ${
     parts.join(', ') || 'no tool calls'
-  }; state ~${stats.stateTokens} tokens (${stats.stateStage}) in ${stats.requests} request(s)`;
+  }; state ~${stats.stateTokens} tokens (${stats.stateStage}) in ${stats.requests} request(s)${
+    stats.requestsFailed > 0 ? `, ${stats.requestsFailed} failed (calls kept)` : ''
+  }`;
 }
 
 /**
@@ -582,6 +591,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
               if (!reply.isAnswered) throw new Error(`prose model did not answer (${reply.reason})`);
               return reply.text;
             },
+            (ms) => $.clock.sleep(ms),
           ),
         config.compactionTimeoutMs,
         (ms, options) => $.clock.sleep(ms, options),

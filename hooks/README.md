@@ -64,6 +64,7 @@ The plugin declares these `userConfig` values in
 | `targetPercent` | `45` |
 | `maxStateTokens` | `25000` |
 | `maxRequestTokens` | `30000` |
+| `maxConcurrentRequests` | `4` |
 | `truncateHeadChars` | `300` |
 | `dropCalls` | `false` |
 | `trimHostText` | `true` |

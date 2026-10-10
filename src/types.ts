@@ -119,6 +119,8 @@ export interface CompactOptions {
   maxStateTokens?: number;
   /** Estimated token ceiling for state plus one batch of questions. Default 30000. */
   maxRequestTokens?: number;
+  /** Jev requests in flight at once. Default 4. */
+  maxConcurrentRequests?: number;
   /** Characters of a dropped tool result to retain. Default 300. */
   truncateHeadChars?: number;
   /**
@@ -160,6 +162,7 @@ export interface ResolvedCompactOptions {
   preserveRecentMessages: number;
   maxStateTokens: number;
   maxRequestTokens: number;
+  maxConcurrentRequests: number;
   dropCalls: boolean;
   truncateHeadChars: number;
   trimHostText: boolean;
@@ -196,6 +199,8 @@ export interface CompactResult {
     /** Which fitting stage the state needed, '' when no request was made. */
     stateStage: string;
     requests: number;
+    /** Requests that failed after their retry; their calls were kept. */
+    requestsFailed: number;
     ms: number;
   };
 }

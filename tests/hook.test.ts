@@ -16,7 +16,7 @@ import {
   withCompactionDeadline,
 } from '../hooks/fast-jev.ts';
 import { parseEnv } from '../src/dotenv.js';
-import { applyDecisions, collectToolCalls, decideCall, type Message } from '../src/index.js';
+import { applyDecisions, collectToolCalls, decideCall, RETRY_DELAY_MS, type Message } from '../src/index.js';
 
 type SessionMessage = Message & { handle?: string };
 
@@ -514,7 +514,8 @@ function host(fetch: ReturnType<typeof jevFetch>) {
     env: { get: async (name: string) => (name === 'TYPESAFE_API_KEY' ? 'k' : undefined) },
     settings: { read: async () => ({}) },
     http: { fetch },
-    clock: { sleep: () => new Promise<void>(() => {}) },
+    // The retry wait passes at once; the compaction deadline never arrives.
+    clock: { sleep: (ms: number) => (ms <= RETRY_DELAY_MS ? Promise.resolve() : new Promise<void>(() => {})) },
     ui: {
       log: (text: string, options?: { to?: string }) => {
         notices.push(text);

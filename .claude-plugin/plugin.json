@@ -100,6 +100,12 @@
       "description": "Estimated token budget for state plus questions in one Jev request.",
       "default": 30000
     },
+    "maxConcurrentRequests": {
+      "type": "number",
+      "title": "Concurrent Jev requests",
+      "description": "Jev requests in flight at once during one compaction.",
+      "default": 4
+    },
     "truncateHeadChars": {
       "type": "number",
       "title": "Truncated tool result head",

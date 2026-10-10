@@ -63,6 +63,7 @@ Jev model is also served through OpenRouter, at
 | `preserveRecentMessages` | `6` | Newest messages never touched (the first is always kept) |
 | `maxStateTokens` | `25000` | Estimated token ceiling for the state |
 | `maxRequestTokens` | `30000` | Estimated ceiling for state plus one batch of questions |
+| `maxConcurrentRequests` | `4` | Jev requests in flight at once |
 | `truncateHeadChars` | `300` | Characters of a dropped tool result retained before its note |
 | `dropCalls` | `false` | `true` removes a no-longer-needed call with its result; `false` leaves a stub of the call |
 | `trimHostText` | `true` | Cut host-generated blocks (`<system-reminder>`, `<task-notification>`, command echoes, hook output; never user prose) outside the pinned messages to a head plus a marker |
@@ -120,8 +121,12 @@ stage was needed, and the number of requests.
    tool would not do).
 5. Questions are split into as many requests as needed so state plus questions
    stays under `maxRequestTokens` (30k by default, under Jev's 32k request
-   limit). The same full state is resent with every request; requests run
-   concurrently and their answers are merged.
+   limit). The same full state is resent with every request; up to
+   `maxConcurrentRequests` (4) run at once and their answers are merged. A 429
+   or 5xx is retried once after `RETRY_DELAY_MS` (pass `sleep` in the fourth
+   argument of `compact`; without it the retry goes out at once). After a 401,
+   403 or a request with no answer, no further request starts. The calls of a
+   request that still failed are kept and counted in `stats.requestsFailed`.
 6. Decisions per call. Jev's scores are compressed (keepCall rarely exceeds
    0.3), so the default `rank` mode ranks them instead of applying an absolute
    threshold: results are kept verbatim best-`keepResult`
@@ -137,5 +142,6 @@ stage was needed, and the number of requests.
    removed, untouched messages are returned as the same objects, and no result
    is ever left without its call.
 
-Jev failures, malformed answers or a missing key
-throw; the caller (or the Claude Code hook) decides what to fall back to.
+A missing key, or Jev failing every request (an error, a malformed answer),
+throws; the caller (or the Claude Code hook) decides what to fall back to.
+When only some requests fail, their calls are kept and the rest is applied.

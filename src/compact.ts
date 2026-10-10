@@ -1,6 +1,6 @@
 import { trimHostText } from './host-text.js';
 import { condenseOldProse, DEFAULT_RECENT_TURNS, type ProseSummarizer } from './prose.js';
-import { noulAnswer } from './request.js';
+import { isRetryable, noulAnswer, stopsAll } from './request.js';
 import { collectToolCalls, estimateTokens, fitState, goalFromMessages, isPinned } from './state.js';
 import type {
   CallAction,
@@ -26,6 +26,7 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   preserveRecentMessages: 6,
   maxStateTokens: 25_000,
   maxRequestTokens: 30_000,
+  maxConcurrentRequests: 4,
   truncateHeadChars: 300,
   dropCalls: false,
   trimHostText: true,
@@ -62,6 +63,10 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
     maxRequestTokens: Math.max(
       1,
       finite(options.maxRequestTokens, DEFAULT_OPTIONS.maxRequestTokens),
+    ),
+    maxConcurrentRequests: Math.max(
+      1,
+      Math.floor(finite(options.maxConcurrentRequests, DEFAULT_OPTIONS.maxConcurrentRequests)),
     ),
     truncateHeadChars: Math.max(
       0,
@@ -259,6 +264,55 @@ async function askBatch(
       },
     ]),
   );
+}
+
+/** Wait before the one retry of a rate-limited or failed request. */
+export const RETRY_DELAY_MS = 1000;
+
+/**
+ * Asks every batch with at most `limit` requests in flight. A 429 or 5xx is
+ * retried once; after a failure every request would share (401, 403, no
+ * answer) no further request is started. Resolves the answers that came back
+ * and the failures; a failed batch's calls get no answer, so they are kept.
+ */
+async function askAll(
+  asker: JevAsker,
+  jobs: readonly { state: CompactionState; batch: readonly ToolCall[] }[],
+  limit: number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<{ answers: Map<string, CallAnswer>; failures: unknown[] }> {
+  const answers = new Map<string, CallAnswer>();
+  const failures: unknown[] = [];
+  let stop: unknown;
+  let next = 0;
+  const ask = async (job: (typeof jobs)[number]) => {
+    try {
+      return await askBatch(asker, job.state, job.batch);
+    } catch (error) {
+      if (!isRetryable(error)) throw error;
+      await sleep(RETRY_DELAY_MS);
+      if (stop !== undefined) throw stop;
+      return askBatch(asker, job.state, job.batch);
+    }
+  };
+  const worker = async (): Promise<void> => {
+    while (next < jobs.length) {
+      const job = jobs[next]!;
+      next += 1;
+      if (stop !== undefined) {
+        failures.push(stop);
+        continue;
+      }
+      try {
+        for (const [id, answer] of await ask(job)) answers.set(id, answer);
+      } catch (error) {
+        if (stopsAll(error)) stop ??= error;
+        failures.push(error);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));
+  return { answers, failures };
 }
 
 /** Whether ending `text` at `index` would separate the two halves of a surrogate pair. */
@@ -479,7 +533,7 @@ export async function compact(
   original: readonly Message[],
   asker: JevAsker,
   options: CompactOptions = {},
-  deps: { summarize?: ProseSummarizer } = {},
+  deps: { summarize?: ProseSummarizer; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<CompactResult> {
   const started = Date.now();
   const resolved = resolveOptions(options);
@@ -494,7 +548,8 @@ export async function compact(
 
   let fitted: { tokens: number; stage: string } = { tokens: 0, stage: '' };
   let requests = 0;
-  const answers = new Map<string, CallAnswer>();
+  let requestsFailed = 0;
+  let answers = new Map<string, CallAnswer>();
   if (candidates.length > 0) {
     const { groups, stage } = stateGroups(messages, calls, candidates, resolved);
     fitted = { tokens: Math.max(0, ...groups.map((group) => group.state.tokens)), stage };
@@ -502,8 +557,13 @@ export async function compact(
       batchCalls(group.calls, group.state.tokens, resolved).map((batch) => ({ state: group.state.state, batch })),
     );
     requests = jobs.length;
-    const answered = await Promise.all(jobs.map((job) => askBatch(asker, job.state, job.batch)));
-    for (const map of answered) for (const [id, answer] of map) answers.set(id, answer);
+    // Without a host clock the one retry goes out at once.
+    const sleep = deps.sleep ?? (async () => {});
+    const asked = await askAll(asker, jobs, resolved.maxConcurrentRequests, sleep);
+    // Nothing answered: let the caller fall back with the reason.
+    if (jobs.length > 0 && asked.failures.length === jobs.length) throw asked.failures[0];
+    answers = asked.answers;
+    requestsFailed = asked.failures.length;
   }
 
   const decisions =
@@ -551,6 +611,7 @@ export async function compact(
       stateTokens: fitted.tokens,
       stateStage: fitted.stage,
       requests,
+      requestsFailed,
       ms: Date.now() - started,
     },
   };

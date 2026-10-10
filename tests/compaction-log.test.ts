@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { appendCompactionLog, COMPACTION_LOG_LINES, compactionLogPath, register } from '../hooks/fast-jev.ts';
+import {
+  appendCompactionLog,
+  COMPACTION_LOG_LINES,
+  compactionLogPath,
+  jevAsker,
+  register,
+  summarize,
+} from '../hooks/fast-jev.ts';
+import { JevTransportError } from '../src/index.js';
 
 const LOG = '/home/me/.claude/fast-jev-compaction/compactions.log';
 
@@ -27,6 +35,20 @@ function fsHost(files: Map<string, string>, env: Record<string, string> = { HOME
 }
 
 const linesOf = (files: Map<string, string>) => files.get(LOG)!.split('\n').filter(Boolean);
+
+describe('Jev transport through the hook', () => {
+  it('reports a fetch that gets no answer as a JevTransportError', async () => {
+    const asker = jevAsker(async () => {
+      throw new Error('getaddrinfo ENOTFOUND api.typesafe.ai');
+    }, 'k', 'jev-latest');
+    await expect(asker.ask('s', {})).rejects.toBeInstanceOf(JevTransportError);
+  });
+
+  it('names failed requests in the outcome summary', () => {
+    const stats = { stateTokens: 10, stateStage: 'full', requests: 3, requestsFailed: 1 };
+    expect(summarize({ messages: [], decisions: [], stats } as never)).toMatch(/in 3 request\(s\), 1 failed \(calls kept\)$/);
+  });
+});
 
 describe('compaction log file', () => {
   it('lives under CLAUDE_CONFIG_DIR, else HOME or USERPROFILE /.claude', async () => {
