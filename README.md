@@ -59,6 +59,21 @@ is also one line in `~/.claude/fast-jev-compaction/compactions.log`.
 To try it from a checkout:
 `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir .`
 
+**Developing.** To have every session, including the desktop app's Code tab, run
+the plugin from a checkout, add the checkout as a local marketplace and install
+from it. Claude Code then reads the plugin from the checkout itself: an edit
+takes effect in new sessions, and in open ones after `/reload-plugins`, with no
+version bump or reinstall.
+
+```sh
+claude plugin marketplace add /path/to/fast-jev-compaction
+claude plugin install fast-jev-compaction@crazycoder
+```
+
+Disable any other install of the plugin first
+(`claude plugin disable fast-jev-compaction@<marketplace>`), so only one
+compaction hook runs.
+
 ## Configure
 
 Options are asked at install time and live under `pluginConfigs`. The ones most
