@@ -645,9 +645,13 @@ export const register: Register = (on: On, options: PluginOptions) => {
       let hiddenNote = '';
       try {
         const view = await $.session.messages({ as: 'api' });
-        const fold = foldHiddenContent(messages, hiddenContent(event.messages, view as ApiMessage[]));
+        const hidden = hiddenContent(event.messages, view as ApiMessage[]);
+        const fold = foldHiddenContent(messages, hidden);
         returned = fold.messages;
-        hiddenNote = `; hidden content: ${fold.folded} folded back${fold.lost > 0 ? `, ${fold.lost} lost` : ''}`;
+        const chars = hidden.reduce((sum, piece) => sum + piece.text.length, 0);
+        hiddenNote = `; hidden content: ${fold.folded} folded back (${chars} chars, not in the reduction above)${
+          fold.lost > 0 ? `, ${fold.lost} lost` : ''
+        }`;
       } catch (error) {
         hiddenNote = `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
       }

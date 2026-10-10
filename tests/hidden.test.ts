@@ -94,6 +94,42 @@ function session() {
   return { rows, api };
 }
 
+describe('hidden content after a compaction and with unmatched rows', () => {
+  it('never takes a prompt row text for hidden content, even after a row it cannot find', () => {
+    const rows: Message[] = [
+      user('first prompt'),
+      { role: 'assistant', text: 'ok', toolUses: [] },
+      user('a row the API form renders differently'),
+      { role: 'assistant', text: 'ok', toolUses: [] },
+      user('<command-name>/compact</command-name>'),
+      user('<local-command-stdout>Compacted</local-command-stdout>'),
+      user('second prompt'),
+      { role: 'assistant', text: 'ok', toolUses: [] },
+    ];
+    const api: ApiMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: '<system-reminder>\ncontext\n</system-reminder>' }, { type: 'text', text: 'first prompt' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      { role: 'user', content: [{ type: 'text', text: 'a row the API form renders DIFFERENTLY' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '<local-command-caveat>Caveat</local-command-caveat>' },
+          { type: 'text', text: '<command-name>/compact</command-name>' },
+          { type: 'text', text: '<local-command-stdout>Compacted</local-command-stdout>' },
+          { type: 'text', text: 'second prompt' },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ];
+    const hidden = hiddenContent(rows, api);
+    const texts = hidden.map((h) => h.text).join('\n');
+    expect(texts).not.toContain('second prompt');
+    expect(texts).not.toContain('<command-name>');
+    expect(texts).toContain('<local-command-caveat>');
+  });
+});
+
 describe('hidden content', () => {
   it('finds what each row group holds beyond the rows, without countdowns or the session context', () => {
     const { rows, api } = session();

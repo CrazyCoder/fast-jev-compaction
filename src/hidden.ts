@@ -62,18 +62,19 @@ function pieces(text: string): string[] {
   return out;
 }
 
-/** The range of text blocks, from `from` on, that joined make up `text`, or undefined. */
-function ownBlocks(blocks: readonly ApiBlock[], from: number, text: string): [number, number] | undefined {
-  if (!text) return undefined;
-  for (let start = from; start < blocks.length; start += 1) {
-    let joined = '';
-    for (let n = start; n < blocks.length; n += 1) {
-      const block = blocks[n]!;
-      if (block.type !== 'text') break;
-      joined += String(block['text'] ?? '');
-      if (joined === text || joined === `${text}\n`) return [start, n + 1];
-      if (!text.startsWith(joined)) break;
-    }
+/**
+ * The end of the run of text blocks starting at `start` that joined make up
+ * `text` (a row's text is its text blocks joined, the last perhaps followed by
+ * a newline), or undefined.
+ */
+function ownBlocksAt(blocks: readonly ApiBlock[], start: number, text: string): number | undefined {
+  let joined = '';
+  for (let n = start; n < blocks.length; n += 1) {
+    const block = blocks[n]!;
+    if (block.type !== 'text') return undefined;
+    joined += String(block['text'] ?? '');
+    if (joined === text || joined === `${text}\n`) return n + 1;
+    if (!text.startsWith(joined)) return undefined;
   }
   return undefined;
 }
@@ -111,7 +112,17 @@ function resultExtras(block: ApiBlock, own: string): string[] {
 export function hiddenContent(rows: readonly Message[], view: readonly ApiMessage[]): HiddenContent[] {
   const resultText = new Map<string, string>();
   for (const row of rows) for (const result of row.toolResults ?? []) resultText.set(result.tool_use_id, result.text);
+  // Prompt rows not yet found in the API form, in transcript order. A row is
+  // looked for at every block, not in sequence, so one row the API form
+  // renders differently does not turn the prompts after it into hidden content.
   const prompts = rows.filter((row) => row.role === 'user' && (row.toolResults ?? []).length === 0 && row.text);
+  const promptAt = (blocks: readonly ApiBlock[], index: number): { row: Message; end: number } | undefined => {
+    for (let p = 0; p < prompts.length; p += 1) {
+      const end = ownBlocksAt(blocks, index, prompts[p]!.text);
+      if (end !== undefined) return { row: prompts.splice(p, 1)[0]!, end };
+    }
+    return undefined;
+  };
 
   const out: HiddenContent[] = [];
   const add = (anchor: HiddenAnchor | undefined, text: string): void => {
@@ -122,7 +133,6 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
   };
 
   let anchor: HiddenAnchor | undefined;
-  let nextPrompt = 0;
   let first = true;
   for (const message of view) {
     if (message.role !== 'user' || typeof message.content === 'string') continue;
@@ -144,26 +154,24 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
     );
     let index = 0;
     while (index < others.length) {
-      const prompt = prompts[nextPrompt];
-      const range = prompt ? ownBlocks(others, index, prompt.text) : undefined;
-      const end = range ? range[0] : others.length;
-      for (const block of others.slice(index, end)) {
-        // Ahead of the first prompt: the session context the host sends again.
-        if (first && !anchor) continue;
-        if (block.type === 'image') {
-          add(anchor, '[fast-jev-compaction: 1 image omitted here]');
-          continue;
-        }
-        if (block.type !== 'text') continue;
-        const text = String(block['text'] ?? '').trim();
-        if (isCountdown(text) || (hasToolReference && text === TOOL_LOADED)) continue;
-        add(anchor, text);
+      const prompt = promptAt(others, index);
+      if (prompt) {
+        anchor = { row: prompt.row };
+        index = prompt.end;
+        continue;
       }
-      if (!range) break;
-      anchor = { row: prompt! };
-      nextPrompt += 1;
-      first = false;
-      index = range[1];
+      const block = others[index]!;
+      index += 1;
+      // Ahead of the first prompt: the session context the host sends again.
+      if (first && !anchor) continue;
+      if (block.type === 'image') {
+        add(anchor, '[fast-jev-compaction: 1 image omitted here]');
+        continue;
+      }
+      if (block.type !== 'text') continue;
+      const text = String(block['text'] ?? '').trim();
+      if (isCountdown(text) || (hasToolReference && text === TOOL_LOADED)) continue;
+      add(anchor, text);
     }
     first = false;
   }
