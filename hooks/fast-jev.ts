@@ -511,8 +511,11 @@ export const register: Register = (on: On, options: PluginOptions) => {
             (count) => {
               redacted += count;
             },
-            ({ system, prompt, maxTokens }) =>
-              $.model.complete({ model: config.proseModel, system, prompt, maxTokens }),
+            async ({ system, prompt, maxTokens }) => {
+              const reply = await $.model.complete({ model: config.proseModel, system, prompt, maxTokens });
+              if (!reply.isAnswered) throw new Error(`prose model did not answer (${reply.reason})`);
+              return reply.text;
+            },
           ),
         config.compactionTimeoutMs,
         (ms, options) => $.clock.sleep(ms, options),

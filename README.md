@@ -13,7 +13,7 @@ rate from 1.0% to 1.7%. `oldProse` still defaults to `keep`; set it to
 
 ## Install
 
-Function hooks are an early-access Claude Code feature (2.1.274+). Set the
+Function hooks are an early-access Claude Code feature (2.1.292+). Set the
 flag and your key where Claude Code runs, e.g. in `~/.claude/settings.json`:
 
 ```json

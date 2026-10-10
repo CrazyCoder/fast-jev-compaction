@@ -698,9 +698,17 @@ describe('old prose through the hook', () => {
       { role: 'assistant' as const, text: `reply ${i} ${'narration '.repeat(100)}`, toolUses: [] },
     ]).flat();
 
-  async function run(options: Record<string, unknown>, complete?: (r: unknown) => Promise<string>) {
+  async function run(options: Record<string, unknown>, complete?: (r: unknown) => Promise<string | null>) {
     const { $, notices } = host(jevFetch(() => 0.1));
-    (($ as unknown) as { model: unknown }).model = { complete: complete ?? (async () => 'MODEL SUMMARY') };
+    const reply = complete ?? (async () => 'MODEL SUMMARY');
+    (($ as unknown) as { model: unknown }).model = {
+      complete: async (r: unknown) => {
+        const text = await reply(r);
+        return text === null
+          ? { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded' }
+          : { isAnswered: true, text };
+      },
+    };
     const messages = turns(12);
     const out = (await hooks({ preserveRecentMessages: 2, ...options })['session.compact']!(
       $,
@@ -726,6 +734,11 @@ describe('old prose through the hook', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ model: 'sonnet', maxTokens: 3000 });
     expect(out.messages[0]!.text).toBe('[fast-jev-compaction summary of 9 earlier turns]\nMODEL SUMMARY');
+  });
+
+  it('summarize falls back to the digest when the model does not answer', async () => {
+    const { out } = await run({ oldProse: 'summarize', recentTurns: 3 }, async () => null);
+    expect(out.messages[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns/);
   });
 
   it('keep makes no model call', async () => {
