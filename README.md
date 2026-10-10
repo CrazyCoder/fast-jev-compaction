@@ -21,23 +21,14 @@ project's many forks; the full lineage is under
 | `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
 | OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction) (235a6c6) |
 | Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. `sessions` searches past sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. With [qmd](https://github.com/tobi/qmd) installed, that search goes through a qmd index of the sessions (`sessionIndex: "off"` keeps it on the scan). It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. Cut notes name the call that gets the rest instead of "re-run the tool". `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader and notes: this fork |
+| Adaptive prose digest | Each compaction keeps your old prose verbatim while that frees enough. When it would be refused, as happens after two or three compactions in a long session, the prose older than `recentTurns` becomes a digest (cut results keep 100-character heads), and later compactions start with the digest, so multi-day sessions keep compacting instead of getting stuck. Pros, cons and options: [Adaptive prose digest](#adaptive-prose-digest) | This fork; the digest is QuanticPotatoes' `oldProse: digest` |
 | Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
 
 k-metehan is
 [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction).
 
-On a replay of real sessions, `oldProse: digest` with `recentTurns: 8` versus
-`keep` took the post-compaction floor from about 155k to about 39k tokens, the
-growth per compaction from +21k to −5k, and the lost-and-needed rate from 1.0%
-to 1.7%. Replaying six real sessions, from a few compactions to a multi-day one
-with 34,000 messages, verbatim prose let the context left after each compaction
-climb until every later one was refused, after two or three. So with `oldProse`
-unset, each compaction keeps old prose verbatim while that frees enough, which
-covers sessions that compact once or twice; when it would be refused, it digests
-old prose instead, with 100-character heads on cut results, and stays on the
-digest for the rest of the session. In the multi-day session that kept the
-context after each compaction between 4% and 26% over 38 compactions (see
-[Configure](#configure)).
+How the adaptive prose digest decides, what it costs and how to control it is
+under [Adaptive prose digest](#adaptive-prose-digest).
 
 ## Install
 
@@ -93,7 +84,6 @@ people touch:
     "fast-jev-compaction@crazycoder": {
       "options": {
         "compactAtPercent": 60,
-        "oldProse": "digest",
         "recentTurns": 8,
         "builtinFallback": "auto"
       }
@@ -105,7 +95,7 @@ people touch:
 | Option | Default | Effect |
 | -- | -- | -- |
 | `compactAtPercent` | `60` | Context percentage at which the plugin asks for a compaction |
-| `oldProse` | unset: verbatim, then `digest` once verbatim would be refused | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`) |
+| `oldProse` | unset: [adaptive](#adaptive-prose-digest) | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`). Unset, verbatim until that would be refused, then the digest |
 | `recentTurns` | `8` | User turns kept outside the digest or summary |
 | `builtinFallback` | `auto` | Which compactions fall back to Claude Code's built-in summary when Jev fails or frees too little: `auto` (only its own automatic one), `always`, `never`. Use `always` if Claude Code's own autoCompact is disabled, so `/compact` and plugin requests still get a summary |
 | `targetPercent` | `45` | Gives up the Jev result if the estimated context after compaction would still exceed this percentage |
@@ -125,6 +115,74 @@ or in a dotenv file:
 Every option, with its default, is listed in
 [hooks/README.md](hooks/README.md#configuration).
 
+## Adaptive prose digest
+
+Each compaction cuts tool calls, tool results and host notices first and keeps
+your old prompts and the assistant's replies verbatim. That is enough for a
+session that compacts once or twice. In a long session the kept prose
+accumulates: each compaction ends higher than the last, and after two or three
+the result frees less than `minReductionRatio` or still leaves more than
+`targetPercent`, so every later compaction is refused.
+
+With `oldProse` unset, the hook then computes the compaction again with the
+**digest**: everything older than the last `recentTurns` user turns (8) becomes
+one message of at most 12,000 characters, and cut results keep 100-character
+heads instead of 300. Only a session with turns older than `recentTurns` has
+anything to digest; otherwise the refusal stands. Once a compaction has used the
+digest, the next ones start with it, since the conversation holds it, also after
+a restart or `--resume`. A new session, or one whose history Claude Code's
+built-in summary replaced, starts verbatim again.
+
+The digest keeps the first prompt (up to 2,000 characters), each later prompt
+(up to 400), the assistant's final reply of each turn (up to 500), the tool
+names used per turn with counts, and the paths and ids mentioned. It drops the
+tool calls and results of those turns and the narration between them. Each
+digest folds the previous one in, so it does not grow with the session; the
+oldest turns are left out first when it is full. The `recall` tool reads every
+original message, call and result back from the transcript.
+
+**Pros**
+
+- Sessions that compact once or twice keep their prose word for word, as they
+  would with `oldProse: keep`.
+- Long sessions keep compacting instead of getting stuck. Replaying six real
+  sessions, from a few compactions to a multi-day one with 34,000 messages: with
+  verbatim prose every long session was refused from the second or third
+  compaction on; with the adaptive default none was. The multi-day one compacted
+  38 times: the first three verbatim (27%, 37%, 43% of the context left), every
+  later one between 4% and 26%.
+- The switch happens at most once per session and needs no setting.
+
+**Cons**
+
+- Old turns survive only as digest lines: an instruction or preference you gave
+  more than `recentTurns` turns ago is cut to 400 characters, and an
+  intermediate reply is gone. Repeat what still matters, or put it in
+  `CLAUDE.md`.
+- Old tool calls leave no stubs, only counts. The model has to call `recall` to
+  see them again, and models do not always think to. On a replay of real
+  sessions the share of cut content that was needed later rose from 1.0% to 1.7%
+  with the digest.
+- The compaction that switches runs Jev twice, once per pass, and both passes
+  share one `compactionTimeoutMs`; with a slow Jev the second pass can time out
+  and the compaction follows `builtinFallback`.
+- A session that switched stays on the digest while the digest is in the
+  conversation; it does not go back to verbatim prose.
+
+**Controlling it**
+
+| Option | Effect on the adaptive digest |
+| -- | -- |
+| `oldProse` | Unset: adaptive. `keep`: never digest (long sessions may get stuck; `builtinFallback` then decides). `digest`: digest from the first compaction. `summarize`: a summary written by `proseModel` from the first compaction |
+| `recentTurns` | User turns kept verbatim outside the digest (8) |
+| `truncateHeadChars` | Head of a cut result: 300, or 100 once the adaptive digest is in use; a set value is used throughout |
+| `minReductionRatio`, `targetPercent` | The guards whose refusal triggers the switch (0.25, 45) |
+| `recall` | Keep it on (the default) so the model can read digested turns back |
+
+Each outcome line in `~/.claude/fast-jev-compaction/compactions.log` names the
+prose mode used (`old prose digest: …`), and ends with
+`verbatim prose was refused (…)` on the compaction that switched.
+
 ## How it works
 
 ```
@@ -134,18 +192,22 @@ history ─┬─ first + newest messages ────────────�
          │                 ├─ best calls, within keepCallTokens ──── input + truncated result
          │                 └─ the rest ───────────────────────────── stub note (dropCalls: false)
          ├─ host notices (<system-reminder>, hook output, …) ──────── cut to a short head
-         └─ prose older than recentTurns ─ keep | digest | summarize
+         └─ prose older than recentTurns ─ keep, or digest (adaptive)
               ▼
    reduction < minReductionRatio, or estimated floor > targetPercent
-              └─▶ builtinFallback: built-in summary, or leave history unchanged
+              ├─▶ prose still verbatim: try again with the digest
+              └─▶ else builtinFallback: built-in summary, or leave history unchanged
 ```
 
 Jev scores are compressed (`keepCall` rarely exceeds 0.3), so the default `rank`
 mode ranks calls instead of using an absolute threshold. Jev sees the whole
 conversation with tool outputs replaced by a one-line note, fitted into
-`maxStateTokens`. Your own prose is kept verbatim unless you opt into
-`oldProse`; only tool calls, tool results and host-generated notices are cut.
-The full algorithm is in [docs/library.md](docs/library.md#algorithm-in-detail).
+`maxStateTokens`. Your own prose is kept verbatim while cutting tool calls, tool
+results and host-generated notices frees enough. When it does not, prose older
+than `recentTurns` user turns becomes a digest, and later compactions start with
+it; `recall` reads the originals back. Set `oldProse` to fix the choice (`keep`,
+`digest` or `summarize`). The full algorithm is in
+[docs/library.md](docs/library.md#algorithm-in-detail).
 
 ## Features and credits
 
@@ -211,7 +273,7 @@ this fork adds is listed under [Added in this fork](#added-in-this-fork).
 | Size guard | Min 25% reduction | Same | Same + `targetPercent` | Same, hidden content counted |
 | Built-in fallback | Always | Automatic compactions only | Same | Same |
 | Secret redaction | No | Yes | Yes | Yes |
-| Host notices / old prose | Kept | Kept | Trimmed / optional digest | Same |
+| Host notices / old prose | Kept | Kept | Trimmed / optional digest | Trimmed / digest when verbatim is refused |
 | Transcript output | Decision dump | Same | Same | One toast; debug log and log file |
 | Hidden content after compaction | Kept on untouched rows (`--resume` reloads the old history) | Lost (no handles) | Lost | Folded back as text |
 | Failed Jev request | Whole compaction falls back | Same | Same | Its calls kept, rest applied |

@@ -92,7 +92,9 @@ Plugin-only options (set as plugin options, see
 `minReductionRatio` (0.25), `compactionTimeoutMs` (15000), `builtinFallback`
 (`auto`), `targetPercent` (45: above this estimated post-compaction context
 percentage, the Jev result is given up for the built-in summary on automatic
-compactions, or skipped otherwise), `envFile`.
+compactions, or skipped otherwise), `envFile`. With `oldProse` unset, the plugin
+first retries a refused result with `oldProse: 'digest'` (see
+[Adaptive prose digest](../README.md#adaptive-prose-digest)).
 
 `result.stats` reports message and character counts before and after, the
 per-reason decision counts, the state size in estimated tokens, which fitting

@@ -836,6 +836,53 @@ describe('old prose through the hook', () => {
     expect(turnsDigested).toBeGreaterThan(5);
   });
 
+  it('does not retry when there is no prose old enough to digest', async () => {
+    const asked = async (options: Record<string, unknown>) => {
+      const bodies: string[] = [];
+      const { $ } = host(jevFetch(() => 0.9, bodies));
+      await hooks(options)['session.compact']!($, { trigger: 'manual', messages: transcript() }, async () => ({}));
+      return bodies.length;
+    };
+    expect(await asked({})).toBe(await asked({ oldProse: 'keep' }));
+  });
+
+  it('gives the digest only what is left of compactionTimeoutMs', async () => {
+    const waits: number[] = [];
+    const { $ } = host(jevFetch(() => 0.1));
+    (($ as unknown) as { clock: unknown }).clock = {
+      sleep: (ms: number) => {
+        if (ms > RETRY_DELAY_MS) waits.push(ms);
+        return ms <= RETRY_DELAY_MS ? Promise.resolve() : new Promise<void>(() => {});
+      },
+    };
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 2_000));
+    try {
+      await hooks({ preserveRecentMessages: 2, recentTurns: 3, compactionTimeoutMs: 15_000 })['session.compact']!(
+        $,
+        { trigger: 'manual', messages: turns(12) },
+        async () => ({}),
+      );
+    } finally {
+      clock.mockRestore();
+    }
+    expect(waits).toHaveLength(2);
+    expect(waits[0]).toBeLessThanOrEqual(15_000);
+    expect(waits[1]).toBeLessThan(waits[0]!);
+  });
+
+  it('names the verbatim refusal when the digest is refused too', async () => {
+    const { out } = await compactPlain({ minReductionRatio: 0.99 }, turns(12));
+    expect(out.skip).toMatch(/verbatim prose refused \(below 99% minimum\); digest: below 99% minimum/);
+  });
+
+  it('starts verbatim after a summary, which is not a digest', async () => {
+    const summary = '[fast-jev-compaction summary of 5 earlier turns]\nWe set up the build.';
+    const earlier = [message('user', summary), message('assistant', 'Understood. Continuing from the earlier-turns summary above.')];
+    const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
+    expect(out.messages![0]!.text).toBe(summary);
+  });
+
   it('does not retry an explicit oldProse: keep', async () => {
     const { out } = await compactPlain({ oldProse: 'keep' }, turns(12));
     expect(out.skip).toMatch(/below 25% minimum/);

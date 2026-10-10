@@ -156,12 +156,20 @@ the hook queues `/compact` for when the turn is over and applies the same wait,
 since a queued compaction's outcome does not come back to it. Toasts are not
 shown in those sessions; the outcome is in the compaction log.
 
-`targetPercent` guards against a post-compaction floor that rises each time,
-because all message text is kept verbatim. The hook estimates the context
-percentage after compaction (current usage percent times chars after / chars
-before); when it exceeds `targetPercent`, the Jev result is given up through the
-same path as `minReductionRatio` (built-in summary on automatic compactions,
-skip otherwise).
+`targetPercent` guards against a post-compaction floor that rises each time
+while old prose is kept verbatim. The hook estimates the context percentage
+after compaction (current usage percent times chars after / chars before).
+
+With `oldProse` unset, a result that falls below `minReductionRatio` or above
+`targetPercent` is computed again with old prose digested and cut results kept
+to `truncateHeadChars` (100 unless set), when the history has turns older than
+`recentTurns`. Both passes share one `compactionTimeoutMs`. A conversation that
+already holds a digest starts with it. When the digest is refused too, or
+`oldProse` is set, the result is given up: built-in summary on automatic
+compactions, skip otherwise. The outcome line, and the reason of a refusal or
+timeout in the second pass, say that verbatim prose was refused first. What the
+digest keeps, its trade-offs and the options that control it:
+[Adaptive prose digest](../README.md#adaptive-prose-digest).
 
 The hook waits at most `compactionTimeoutMs` for the Jev round, across all
 request batches. On a timeout, a plugin-triggered compaction returns a skip

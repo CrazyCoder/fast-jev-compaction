@@ -150,7 +150,7 @@
     "oldProse": {
       "type": "string",
       "title": "Old prose",
-      "description": "What becomes of user and assistant prose older than the last `recentTurns` user turns: `keep` (verbatim), `digest` (deterministic extractive digest) or `summarize` (summary written by `proseModel`, falling back to the digest). Unset: verbatim while that frees enough; the digest once verbatim prose would leave the compaction refused, and from then on in that session."
+      "description": "What becomes of user and assistant prose older than the last `recentTurns` user turns: `keep` (verbatim), `digest` (deterministic extractive digest) or `summarize` (summary written by `proseModel`, falling back to the digest). Unset: verbatim while that frees enough; the digest once verbatim prose would leave the compaction refused, and while that digest stays in the conversation."
     },
     "recentTurns": {
       "type": "number",

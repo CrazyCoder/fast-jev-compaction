@@ -21,7 +21,7 @@ import {
   recallCommand,
   recallRequest,
 } from '../src/recall/tool.ts';
-import { parseCondensed, type ProseSummarizer } from '../src/prose.js';
+import { DEFAULT_RECENT_TURNS, parseCondensed, splitOldProse, type ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
   CompactResult,
@@ -55,19 +55,22 @@ const DIGEST_HEAD_CHARS = 100;
  * The old-prose settings each compaction tries in order, the first that clears
  * the size guards winning. A set `oldProse` is used as it is. Unset, old prose
  * stays verbatim, which suits sessions that compact once or twice; when that
- * would be refused, or once the conversation already holds a digest, the old
- * prose is digested and cut results keep shorter heads. Replaying long
+ * would be refused, or while the conversation holds a digest from an earlier
+ * compaction, the old prose is digested and cut results keep shorter heads.
+ * With no turn old enough to digest there is nothing to retry. Replaying long
  * sessions, verbatim prose let each compaction end higher than the last until
  * compaction was refused for good; switching to the digest kept it bounded.
  */
 export function prosePlans(config: HookConfig, messages: readonly Message[]): Partial<CompactOptions>[] {
   if (config.oldProse) return [{}];
+  const verbatim: Partial<CompactOptions> = { oldProse: 'keep' };
   const digest: Partial<CompactOptions> = {
     oldProse: 'digest',
     truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
   };
-  if (messages.some((message) => parseCondensed(message))) return [digest];
-  return [{ oldProse: 'keep' }, digest];
+  if (messages.some((message) => parseCondensed(message)?.kind === 'digest')) return [digest];
+  if (!splitOldProse(messages, config.recentTurns ?? DEFAULT_RECENT_TURNS)) return [verbatim];
+  return [verbatim, digest];
 }
 
 /**
@@ -696,6 +699,10 @@ export const register: Register = (on: On, options: PluginOptions) => {
       const reason = why.length > 200 ? `${why.slice(0, 200)}…` : why;
       return { skip: `fast-jev-compaction: ${reason}; conversation left as it is` };
     };
+    // Why verbatim prose was refused, once the digest is being tried.
+    let verbatimRefused = '';
+    const afterVerbatim = (why: string) =>
+      verbatimRefused ? `verbatim prose refused (${verbatimRefused}); digest: ${why}` : why;
     try {
       // `/compact <instructions>`: what the user wants kept, for Jev's goal.
       const config = {
@@ -703,40 +710,31 @@ export const register: Register = (on: On, options: PluginOptions) => {
         apiKey: await getApiKey($, configured),
         instructions: event.instructions,
       };
-      // A retry with the digest asks Jev much the same questions: each answered
-      // request is sent once. A failed one is not kept, so its retry goes out.
-      const answers = new Map<string, Promise<HookFetchResponse>>();
-      const fetchOnce = (url: string, init?: HookFetchInit): Promise<HookFetchResponse> => {
-        const key = `${url}\n${init?.body ?? ''}`;
-        const known = answers.get(key);
-        if (known) return known;
-        const answer = $.http
-          .fetch(url, init)
-          .then((r: HookFetchResponse) => ({ status: r.status, ok: r.ok, text: r.text }));
-        answers.set(key, answer);
-        answer.then(
-          (r) => r.ok || answers.delete(key),
-          () => answers.delete(key),
-        );
-        return answer;
-      };
       let percentBefore: number | undefined;
       try {
         percentBefore = (await $.session.usage()).context.percent;
       } catch {
         percentBefore = undefined;
       }
+      // A retry with the digest shares the one compactionTimeoutMs budget.
+      const deadlineAt = Date.now() + config.compactionTimeoutMs;
       let refusal = '';
       let refusedBecause = '';
       for (const [attempt, plan] of prosePlans(configured, event.messages).entries()) {
+        if (attempt > 0) verbatimRefused = refusedBecause;
         const planned = { ...config, ...plan };
+        const remaining = deadlineAt - Date.now();
+        if (remaining <= 0) throw new CompactionTimeoutError(config.compactionTimeoutMs);
         let redacted = 0;
         const { result, messages } = await withCompactionDeadline(
           () =>
             compactSession(
               event.messages,
               planned,
-              fetchOnce,
+              async (url, init) => {
+                const response = await $.http.fetch(url, init);
+                return { status: response.status, ok: response.ok, text: response.text };
+              },
               (count) => {
                 redacted += count;
               },
@@ -747,7 +745,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
               },
               (ms) => $.clock.sleep(ms),
             ),
-          config.compactionTimeoutMs,
+          remaining,
           (ms, options) => $.clock.sleep(ms, options),
         );
         debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
@@ -785,7 +783,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         } else if (exceedsTarget(estimate, config.targetPercent)) {
           refusedBecause = `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target`;
         } else {
-          const retried = attempt > 0 ? `; verbatim prose was refused (${refusedBecause})` : '';
+          const retried = verbatimRefused ? `; verbatim prose was refused (${verbatimRefused})` : '';
           await notify(
             $,
             event.trigger,
@@ -796,13 +794,14 @@ export const register: Register = (on: On, options: PluginOptions) => {
         }
         refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }
-      return giveUp(refusal);
+      return giveUp(afterVerbatim(refusal));
     } catch (error) {
+      const why = afterVerbatim(error instanceof Error ? error.message : String(error));
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
-        await notify($, event.trigger, `not compacted (${error.message})`, `not compacted (${toastReason(error.message)})`);
-        return { skip: `fast-jev-compaction: ${error.message}; conversation left unchanged` };
+        await notify($, event.trigger, `not compacted (${why})`, `not compacted (${toastReason(why)})`);
+        return { skip: `fast-jev-compaction: ${why}; conversation left unchanged` };
       }
-      return giveUp(error instanceof Error ? error.message : String(error));
+      return giveUp(why);
     }
   });
 
