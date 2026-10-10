@@ -12,15 +12,32 @@ describe('recall archive', () => {
     expect(dir).toBe('/cfg/fast-jev-compaction/recall/sess-1');
   });
 
-  it('writes rows as chunks and reads them back in order, as one group per compaction', async () => {
+  it('writes one group per compaction; a call archived before is kept only as its id', async () => {
     const { fs } = memoryFs();
-    await archiveRows(fs, dir, [user('go'), call('t1'), result('t1', 'full one')]);
+    await archiveRows(fs, dir, [user('go'), callRow('t1', '', { file_path: 'a.ts' }), result('t1', 'full one')]);
     // The next compaction sees the kept copies again, cut, plus new rows.
-    await archiveRows(fs, dir, [user('go'), call('t1'), result('t1', 'cut'), user('next'), call('t2'), result('t2', 'two')]);
+    await archiveRows(fs, dir, [
+      user('go'),
+      callRow('t1', '', { file_path: 'a.ts' }),
+      result('t1', 'cut'),
+      user('next'),
+      call('t2'),
+      result('t2', 'two'),
+    ]);
     const groups = await loadArchive(fs, dir);
-    expect(groups).toHaveLength(2);
-    expect(groups[0]!.map((r) => r.text || r.toolResults?.[0]?.text || r.toolUses[0]?.tool_use_id)).toEqual(['go', 't1', 'full one']);
-    expect(groups[1]!.map((r) => r.text || r.toolResults?.[0]?.text || r.toolUses[0]?.tool_use_id)).toEqual(['next', 't2', 'two']);
+    const shape = (r: (typeof groups)[0][0]) => r.text || r.toolResults?.[0]?.text || r.toolUses[0]?.tool_use_id;
+    expect(groups.map((g) => g.map(shape))).toEqual([
+      ['go', 't1', 'full one'],
+      ['go', 't1', 'next', 't2', 'two'],
+    ]);
+    expect(groups[1]![1]!.toolUses[0]!.input).toEqual({});
+  });
+
+  it('never archives the recall tool\'s own calls', async () => {
+    const { fs } = memoryFs();
+    const recall = { role: 'assistant' as const, text: '', toolUses: [{ tool_use_id: 'r1', tool: 'mcp__fast-jev-compaction__recall', input: { query: 'x' } }] };
+    await archiveRows(fs, dir, [user('go'), recall, result('r1', 'a 48k recall answer')]);
+    expect((await loadArchive(fs, dir)).flat().map((r) => r.text)).toEqual(['go']);
   });
 
   it('splits a large compaction into chunks under the read limit', async () => {
@@ -68,5 +85,14 @@ describe('recall archive', () => {
       ['new', true],
     ]);
     expect(await loadArchive(fs, archiveDir('/cfg', 'old'))).toEqual([]);
+  });
+
+  it('never empties the archive of the session being resumed', async () => {
+    let now = 0;
+    const { fs } = memoryFs(() => now);
+    await archiveRows(fs, archiveDir('/cfg', 'old'), [user('old prompt')]);
+    now = 40 * DAY;
+    await pruneArchives(fs, '/cfg', now, 30 * DAY, 'old');
+    expect((await loadArchive(fs, archiveDir('/cfg', 'old'))).flat()).toHaveLength(1);
   });
 });

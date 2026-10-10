@@ -1,4 +1,5 @@
 import type { Message } from '../types.js';
+import { RECALL_TOOL } from './recall.js';
 
 /**
  * The recall archive: what each compaction is about to cut, saved first.
@@ -7,8 +8,8 @@ import type { Message } from '../types.js';
  * 4 MiB, and transcripts run to hundreds of MB), so the compaction hook saves
  * the rows it receives, with their full tool results, under
  * `<config>/fast-jev-compaction/recall/<session>/`. Each compaction adds one
- * group of chunk files, `<group>-<part>.json`, holding only rows no earlier
- * group has. `$.fs` cannot delete, so pruning empties old chunks.
+ * group of chunk files, `<group>-<part>.json` (archiveRows says what a group
+ * holds). `$.fs` cannot delete, so pruning empties old chunks.
  */
 
 /** The `$.fs` calls the archive uses. */
@@ -92,23 +93,28 @@ function slim(row: Message): Message {
   };
 }
 
-/** What a row adds: the keys of its calls, results and text. */
-function keysOf(row: Message): string[] {
-  return [
-    ...row.toolUses.map((u) => `call\u0000${u.tool_use_id}`),
-    ...(row.toolResults ?? []).map((r) => `result\u0000${r.tool_use_id}`),
-    ...(row.text ? [`${row.role}\u0000${row.text}`] : []),
-  ];
-}
-
 /**
- * Saves the rows no earlier group has as a new group. Returns how many rows
- * and chunk files were written.
+ * Saves a compaction's rows as a new group. Prompts and replies are saved each
+ * time (they are short, and recall needs them in order to tell a kept copy from
+ * the same words said again); a call an earlier group holds is saved as its id
+ * only, and its result not at all. Recall's own calls and results are left out:
+ * they hold nothing new. Returns how many rows and chunk files were written.
  */
 export async function archiveRows(fs: ArchiveFs, dir: string, rows: readonly Message[]): Promise<{ rows: number; files: number }> {
-  const groups = await loadArchive(fs, dir);
-  const seen = new Set(groups.flat().flatMap(keysOf));
-  const fresh = rows.filter((row) => keysOf(row).some((key) => !seen.has(key))).map(slim);
+  const archived = (await loadArchive(fs, dir)).flat();
+  const calls = new Set(archived.flatMap((r) => r.toolUses.map((u) => u.tool_use_id)));
+  const results = new Set(archived.flatMap((r) => (r.toolResults ?? []).map((t) => t.tool_use_id)));
+  const recall = new Set(rows.flatMap((r) => r.toolUses.filter((u) => u.tool === RECALL_TOOL).map((u) => u.tool_use_id)));
+  const fresh = rows
+    .map((row): Message => {
+      const toolUses = row.toolUses
+        .filter((u) => !recall.has(u.tool_use_id))
+        .map((u) => (calls.has(u.tool_use_id) ? { ...u, input: {} } : u));
+      const toolResults = (row.toolResults ?? []).filter((t) => !recall.has(t.tool_use_id) && !results.has(t.tool_use_id));
+      return { role: row.role, text: row.text, toolUses, ...(toolResults.length > 0 && { toolResults }) };
+    })
+    .filter((row) => row.text || row.toolUses.length > 0 || row.toolResults)
+    .map(slim);
   if (fresh.length === 0) return { rows: 0, files: 0 };
 
   const chunks: Message[][] = [[]];
@@ -130,12 +136,21 @@ export async function archiveRows(fs: ArchiveFs, dir: string, rows: readonly Mes
   return { rows: fresh.length, files: chunks.length };
 }
 
-/** Empties the chunks of every session whose newest chunk is older than `maxAgeMs`. */
-export async function pruneArchives(fs: ArchiveFs, configDir: string, now: number, maxAgeMs: number): Promise<number> {
+/**
+ * Empties the chunks of every session whose newest chunk is older than
+ * `maxAgeMs`, except `keep` (the session starting, which may be a resumed one).
+ */
+export async function pruneArchives(
+  fs: ArchiveFs,
+  configDir: string,
+  now: number,
+  maxAgeMs: number,
+  keep?: string,
+): Promise<number> {
   const root = archiveRoot(configDir);
   let emptied = 0;
   for (const session of await listOrNone(fs, root)) {
-    if (session.kind !== 'dir') continue;
+    if (session.kind !== 'dir' || session.name === keep) continue;
     const dir = `${root}/${session.name}`;
     const chunks = (await listOrNone(fs, dir)).filter((e) => e.kind === 'file' && CHUNK.test(e.name));
     if (chunks.length === 0 || now - Math.max(...chunks.map((c) => c.mtimeMs)) <= maxAgeMs) continue;

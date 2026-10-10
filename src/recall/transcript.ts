@@ -2,20 +2,21 @@ import type { Message } from '../types.js';
 
 /**
  * The entries recall searches: the user's prompts, the assistant's replies and
- * each tool call with its result, numbered in order. They are read from a
- * session transcript (`<session>.jsonl`, readTranscript) or from groups of
- * session rows (entriesFromGroups).
+ * each tool call with its result, numbered in order, read from groups of
+ * session rows (the archive's groups, then the live rows).
  *
- * A compaction keeps messages by writing them again after its boundary, cut or
- * not. So a tool call keeps the first result read for its id (the uncut one),
- * and a prompt or reply copied after a boundary is not counted twice.
+ * Each group starts at the beginning of the conversation as its compaction saw
+ * it, so a kept message appears again in a later group. A tool call keeps the
+ * first result read for its id (the uncut one). A prompt or reply counts once
+ * per position: it is the same entry when the same text follows the same
+ * entry, so a kept copy is skipped while the same words said again after other
+ * work are not.
  */
 
 export type Entry =
-  | { n: number; line?: number; kind: 'prompt' | 'reply'; text: string }
+  | { n: number; kind: 'prompt' | 'reply'; text: string }
   | {
       n: number;
-      line?: number;
       kind: 'call';
       id: string;
       tool: string;
@@ -37,110 +38,57 @@ function withoutReminders(text: string): string {
   return text.replace(REMINDER, '');
 }
 
-/** Builds the entry list; `boundary()` marks where a compaction wrote kept messages again. */
-function collector() {
+export function entriesFromGroups(groups: readonly (readonly Message[])[]): Entry[] {
   const entries: Entry[] = [];
   const calls = new Map<string, Call>();
-  const beforeBoundary = new Set<string>();
-  const sinceBoundary = new Set<string>();
-  let afterBoundary = false;
+  /** Each prompt or reply seen, keyed by its text and the entry before it, to an id. */
+  const texts = new Map<string, string>();
+  let previous = '';
 
-  return {
-    entries,
-    boundary(): void {
-      for (const key of sinceBoundary) beforeBoundary.add(key);
-      sinceBoundary.clear();
-      afterBoundary = true;
-    },
-    text(kind: 'prompt' | 'reply', raw: string, line?: number): void {
-      const text = withoutReminders(raw).trim();
-      if (!text) return;
-      const key = `${kind}\u0000${text}`;
-      if (afterBoundary && beforeBoundary.has(key)) return;
-      sinceBoundary.add(key);
-      entries.push({ n: entries.length + 1, ...(line !== undefined && { line }), kind, text });
-    },
-    call(id: string, tool: string, input: Record<string, unknown>, line?: number): void {
-      if (calls.has(id)) return;
-      const call: Call = { n: entries.length + 1, ...(line !== undefined && { line }), kind: 'call', id, tool, input };
-      calls.set(id, call);
-      entries.push(call);
-    },
-    result(id: string, text: string, isError: boolean): void {
-      const call = calls.get(id);
-      if (!call || call.result !== undefined) return;
-      call.result = withoutReminders(text);
-      if (isError) call.isError = true;
-      const saved = SAVED_TO.exec(text)?.[1];
-      if (saved) call.savedTo = saved.trim();
-    },
+  const text = (kind: 'prompt' | 'reply', raw: string): void => {
+    const body = withoutReminders(raw).trim();
+    if (!body) return;
+    const key = `${kind}\u0000${body}\u0000${previous}`;
+    const seen = texts.get(key);
+    if (seen !== undefined) {
+      previous = seen;
+      return;
+    }
+    previous = `t${texts.size}`;
+    texts.set(key, previous);
+    entries.push({ n: entries.length + 1, kind, text: body });
   };
-}
 
-type Block = { type?: string; [field: string]: unknown };
-type Row = {
-  type?: string;
-  subtype?: string;
-  isMeta?: boolean;
-  isSidechain?: boolean;
-  isCompactSummary?: boolean;
-  message?: { content?: unknown };
-};
-
-/** The text of a message or tool result content: a string, or text blocks joined. */
-function textOf(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return (content as Block[])
-    .map((block) => (block.type === 'text' ? String(block['text'] ?? '') : block.type === 'image' ? '[image]' : ''))
-    .filter(Boolean)
-    .join('\n');
-}
-
-/** Entries from a transcript file's text. */
-export function readTranscript(jsonl: string): Entry[] {
-  const c = collector();
-  jsonl.split('\n').forEach((raw, index) => {
-    const line = index + 1;
-    let row: Row;
-    try {
-      row = JSON.parse(raw) as Row;
-    } catch {
-      return;
-    }
-    if (row.type === 'system' && row.subtype === 'compact_boundary') return c.boundary();
-    if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isSidechain || row.isCompactSummary) return;
-    const content = row.message?.content;
-    const blocks: Block[] = Array.isArray(content) ? (content as Block[]) : [];
-    if (row.type === 'user') {
-      for (const block of blocks.filter((b) => b.type === 'tool_result')) {
-        c.result(String(block['tool_use_id']), textOf(block['content']), block['is_error'] === true);
-      }
-      c.text('prompt', typeof content === 'string' ? content : textOf(blocks.filter((b) => b.type === 'text')), line);
-      return;
-    }
-    c.text('reply', textOf(blocks.filter((b) => b.type === 'text')), line);
-    for (const block of blocks.filter((b) => b.type === 'tool_use')) {
-      c.call(String(block['id']), String(block['name']), (block['input'] as Record<string, unknown>) ?? {}, line);
-    }
-  });
-  return c.entries;
-}
-
-/** Entries from groups of session rows, each group read after a compaction boundary. */
-export function entriesFromGroups(groups: readonly (readonly Message[])[]): Entry[] {
-  const c = collector();
-  groups.forEach((rows, index) => {
-    if (index > 0) c.boundary();
+  for (const rows of groups) {
+    previous = '';
     for (const row of rows) {
-      for (const result of row.toolResults ?? []) c.result(result.tool_use_id, result.text, result.isError === true);
+      for (const result of row.toolResults ?? []) {
+        const call = calls.get(result.tool_use_id);
+        if (!call || call.result !== undefined) continue;
+        call.result = withoutReminders(result.text);
+        if (result.isError) call.isError = true;
+        const saved = SAVED_TO.exec(result.text)?.[1];
+        if (saved) call.savedTo = saved.trim();
+      }
       if (row.role === 'user') {
-        c.text('prompt', row.text);
+        text('prompt', row.text);
         continue;
       }
-      c.text('reply', row.text);
-      for (const use of row.toolUses) c.call(use.tool_use_id, use.tool, (use.input as Record<string, unknown>) ?? {});
+      text('reply', row.text);
+      for (const use of row.toolUses) {
+        previous = `c${use.tool_use_id}`;
+        if (calls.has(use.tool_use_id)) continue;
+        const call: Call = {
+          n: entries.length + 1,
+          kind: 'call',
+          id: use.tool_use_id,
+          tool: use.tool,
+          input: (use.input as Record<string, unknown>) ?? {},
+        };
+        calls.set(use.tool_use_id, call);
+        entries.push(call);
+      }
     }
-  });
-  return c.entries;
+  }
+  return entries;
 }
