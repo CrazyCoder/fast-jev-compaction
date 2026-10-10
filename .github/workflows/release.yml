@@ -1,6 +1,6 @@
 name: Release
 
-# A release is made by pushing a version tag (`git push origin v0.10.0`); see
+# A release is made by pushing a version tag (`git push origin vX.Y.Z`); see
 # "Releasing" in the README. Pushes to main never release.
 on:
   push:

@@ -378,8 +378,8 @@ A push to `main` never makes a release. To release a version:
 3. Tag the commit and push the tag:
 
 ```sh
-git tag v0.10.0
-git push origin main v0.10.0
+git tag vX.Y.Z
+git push origin main vX.Y.Z
 ```
 
 The Release workflow then checks that the tag matches every declared version,
