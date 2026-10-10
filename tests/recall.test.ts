@@ -21,6 +21,52 @@ function session(): Entry[] {
   ];
 }
 
+describe('recall touched', () => {
+  function work(): Entry[] {
+    n = 0;
+    return [
+      call('t1', 'Read', { file_path: 'src/app.ts' }, 'code'),
+      call('t2', 'Edit', { file_path: 'src/app.ts', old_string: 'a', new_string: 'b' }, 'ok'),
+      call('t3', 'Write', { file_path: 'docs/notes.md', content: 'x' }, 'ok'),
+      call('t4', 'MultiEdit', { file_path: 'C:\\work\\src\\app.ts', edits: [] }, 'ok'),
+      call('t5', 'NotebookEdit', { notebook_path: 'nb/analysis.ipynb', new_source: 'x' }, 'ok'),
+      call('t6', 'Edit', { file_path: 'src/app.ts', old_string: 'b', new_string: 'c' }, 'Error: not found', { isError: true }),
+      call('t7', 'Bash', { command: 'npm test' }, 'PASS'),
+    ];
+  }
+
+  it('lists the files changed, newest first, with the calls that changed them', () => {
+    expect(runRecall(work(), { touched: true })).toBe(
+      [
+        'Files changed in this session (4):',
+        'src/app.ts: Edit #2 t2, Edit #6 t6 (failed)',
+        'nb/analysis.ipynb: NotebookEdit #5 t5',
+        'C:\\work\\src\\app.ts: MultiEdit #4 t4',
+        'docs/notes.md: Write #3 t3',
+        'For every call on a file, reads included: touched: "<part of the path>".',
+      ].join('\n'),
+    );
+  });
+
+  it('lists every call on the files a path part matches, reads included', () => {
+    const out = runRecall(work(), { touched: 'app.ts' });
+    expect(out.split('\n')).toEqual([
+      'Calls on files matching "app.ts" (4):',
+      '#1 Read src/app.ts (t1)',
+      '#2 Edit src/app.ts (t2)',
+      '#4 MultiEdit C:\\work\\src\\app.ts (t4)',
+      '#6 Edit src/app.ts (t6, failed)',
+      'Expand a call by its id for its input and result.',
+    ]);
+    expect(runRecall(work(), { touched: 'nothing.rs' })).toBe('No calls on files matching "nothing.rs".');
+  });
+
+  it('says so when nothing was changed', () => {
+    n = 0;
+    expect(runRecall([prompt('hi')], { touched: true })).toBe('No files changed in this session.');
+  });
+});
+
 describe('recall query', () => {
   it('ranks the entry holding the most of the words first, ignoring stopwords', () => {
     const out = runRecall(session(), { query: 'the redis timeout' });

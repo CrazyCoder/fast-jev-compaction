@@ -25,6 +25,8 @@ export type RecallRequest = {
   page?: number;
   /** For expand: where in a long text to start, from a previous answer's footer. */
   offset?: number;
+  /** true: the files changed, by which calls; a path part: every call on the files it matches. */
+  touched?: boolean | string;
 };
 
 export type RecallDeps = {
@@ -248,6 +250,58 @@ function runRange(entries: readonly Entry[], [from, to]: readonly [number, numbe
   return `Entries #${from}..#${to}, page ${p.page}/${p.pages}:\n${lines.join('\n')}${next}`;
 }
 
+const CHANGING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const TOUCHED_PAGE = 50;
+
+type Call = Extract<Entry, { kind: 'call' }>;
+
+/** The file a call works on, from its input. */
+function fileOf(call: Call): string | undefined {
+  for (const field of ['file_path', 'notebook_path', 'path']) {
+    const value = call.input[field];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
+function callRef(call: Call): string {
+  return `${call.id}${call.isError ? ', failed' : ''}`;
+}
+
+function paged(lines: readonly string[], page: number, head: string, tail: string): string {
+  const p = pager(lines.length, TOUCHED_PAGE, page);
+  const next = p.page < p.pages ? `\nNext: page: ${p.page + 1}.` : '';
+  const pages = p.pages > 1 ? `, page ${p.page}/${p.pages}` : '';
+  return `${head} (${lines.length}${pages}):\n${lines.slice(p.from, p.from + TOUCHED_PAGE).join('\n')}\n${tail}${next}`;
+}
+
+/** The files changed, newest change first, or every call on the files `part` matches. */
+function runTouched(entries: readonly Entry[], touched: true | string, page: number): string {
+  const calls = entries.filter((e): e is Call => e.kind === 'call' && fileOf(e) !== undefined);
+  if (typeof touched === 'string') {
+    const part = touched.toLowerCase();
+    const lines = calls
+      .filter((c) => fileOf(c)!.toLowerCase().includes(part))
+      .map((c) => `#${c.n} ${c.tool} ${fileOf(c)} (${callRef(c)})`);
+    if (lines.length === 0) return `No calls on files matching "${clip(touched, QUERY_ECHO_CHARS)}".`;
+    return paged(lines, page, `Calls on files matching "${clip(touched, QUERY_ECHO_CHARS)}"`, 'Expand a call by its id for its input and result.');
+  }
+  const byFile = new Map<string, Call[]>();
+  for (const call of calls.filter((c) => CHANGING_TOOLS.has(c.tool))) {
+    const file = fileOf(call)!;
+    byFile.set(file, [...(byFile.get(file) ?? []), call]);
+  }
+  if (byFile.size === 0) return 'No files changed in this session.';
+  const lines = [...byFile]
+    .sort(([, a], [, b]) => b.at(-1)!.n - a.at(-1)!.n)
+    .map(([file, changes]) => {
+      const shown = changes.slice(-5).map((c) => `${c.tool} #${c.n} ${c.id}${c.isError ? ' (failed)' : ''}`);
+      const more = changes.length > 5 ? `${changes.length - 5} earlier, ` : '';
+      return `${file}: ${more}${shown.join(', ')}`;
+    });
+  return paged(lines, page, 'Files changed in this session', 'For every call on a file, reads included: touched: "<part of the path>".');
+}
+
 /**
  * What each of `count` expanded entries may take of the budget: an even share
  * of it after room for the notes on refs not found or not shown (pi-blackhole
@@ -331,6 +385,9 @@ export function runRecall(all: readonly Entry[], request: RecallRequest, deps: R
       return runExpand(entries, request.expand, Math.max(0, Math.floor(request.offset ?? 0)), deps);
     }
     if (request.range) return runRange(entries, request.range, page);
+    if (request.touched === true || (typeof request.touched === 'string' && request.touched.trim())) {
+      return runTouched(entries, request.touched === true ? true : request.touched.trim(), page);
+    }
     if (request.query?.trim()) return runQuery(entries, request.query.trim(), page);
   } catch (error) {
     return `Recall failed: ${error instanceof Error ? error.message : String(error)}`;

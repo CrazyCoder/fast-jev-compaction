@@ -149,5 +149,8 @@ describe('recall requests', () => {
     expect(recallRequest({ expand: ['#3', 4, null], offset: 100 })).toEqual({ expand: ['#3', 4], offset: 100 });
     expect(recallRequest({ range: ['2', 5] })).toEqual({ range: [2, 5] });
     expect(recallRequest({ range: [1], page: 'two' })).toEqual({});
+    expect(recallRequest({ touched: true })).toEqual({ touched: true });
+    expect(recallRequest({ touched: 'app.ts' })).toEqual({ touched: 'app.ts' });
+    expect(recallRequest({ touched: 1 })).toEqual({});
   });
 });

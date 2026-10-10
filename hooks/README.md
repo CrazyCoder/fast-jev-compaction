@@ -203,6 +203,10 @@ copies after each boundary, and keeps each call's first, uncut result:
   result text, which fetched content can forge). Long text is cut at a line end
   with an `offset` to continue from.
 - `range`: entries `#from..#to`, one line each, 20 per page.
+- `touched`: `true` lists the files Edit, Write, MultiEdit and NotebookEdit
+  changed, newest change first, with the last five calls on each; a part of a
+  path lists every call on the files it matches, reads included. 50 lines per
+  page.
 
 An answer holds at most 48,000 characters, shared between expanded entries.
 Recall's own calls are not listed. Cut notes end with

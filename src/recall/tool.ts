@@ -21,7 +21,8 @@ export const RECALL_DESCRIPTION = [
   '- query: keywords (ranked) or a regex, e.g. "redis timeout"; 5 hits per page.',
   '- expand: ["#N" or a tool_use_id, ...]: those entries in full, a call with its input and result.',
   '- range: [from, to]: entries #from..#to in order, one line each.',
-  'Add page for more query or range results, and offset to continue a long expand.',
+  '- touched: true for the files changed in this session and the calls that changed them; a part of a path for every call on the files it matches, reads included.',
+  'Add page for more query, range or touched results, and offset to continue a long expand.',
   'A compaction note names the tool_use_id to expand. A tool_use_id always names the same call; #N can shift as the session grows.',
 ].join('\n');
 
@@ -35,7 +36,11 @@ export const RECALL_INPUT_SCHEMA = {
       description: 'Entries to return in full: "#N" from recall results, or a tool_use_id.',
     },
     range: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2, description: '[from, to] entry numbers.' },
-    page: { type: 'number', description: 'Page of query or range results, from 1.' },
+    touched: {
+      type: ['boolean', 'string'],
+      description: 'true: files changed and by which calls; a part of a path: every call on the files it matches.',
+    },
+    page: { type: 'number', description: 'Page of query, range or touched results, from 1.' },
     offset: { type: 'number', description: 'For expand: where to continue, from a cut note.' },
   },
 };
@@ -51,6 +56,7 @@ export function recallRequest(e: Record<string, unknown>): RecallRequest {
     ...(range?.length === 2 && range.every(Number.isFinite) && { range: [range[0]!, range[1]!] as const }),
     ...(number(e['page']) !== undefined && { page: number(e['page']) }),
     ...(number(e['offset']) !== undefined && { offset: number(e['offset']) }),
+    ...((e['touched'] === true || typeof e['touched'] === 'string') && { touched: e['touched'] as true | string }),
   };
 }
 
