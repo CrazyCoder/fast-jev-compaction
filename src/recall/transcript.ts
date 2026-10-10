@@ -1,19 +1,21 @@
+import type { Message } from '../types.js';
+
 /**
- * Reads a Claude Code session transcript (`<session>.jsonl`) into the entries
- * recall searches: the user's prompts, the assistant's replies and each tool
- * call with its result, numbered in order.
+ * The entries recall searches: the user's prompts, the assistant's replies and
+ * each tool call with its result, numbered in order. They are read from a
+ * session transcript (`<session>.jsonl`, readTranscript) or from groups of
+ * session rows (entriesFromGroups).
  *
- * A compaction deletes nothing from the file: it appends a `compact_boundary`
- * and writes the messages it kept again after it. So a tool call keeps the
- * first result the file holds for its id (the uncut one), and a prompt or reply
- * written again after a boundary is not counted twice.
+ * A compaction keeps messages by writing them again after its boundary, cut or
+ * not. So a tool call keeps the first result read for its id (the uncut one),
+ * and a prompt or reply copied after a boundary is not counted twice.
  */
 
 export type Entry =
-  | { n: number; line: number; kind: 'prompt' | 'reply'; text: string }
+  | { n: number; line?: number; kind: 'prompt' | 'reply'; text: string }
   | {
       n: number;
-      line: number;
+      line?: number;
       kind: 'call';
       id: string;
       tool: string;
@@ -25,6 +27,56 @@ export type Entry =
       savedTo?: string;
     };
 
+type Call = Extract<Entry, { kind: 'call' }>;
+
+const SAVED_TO = /Full output saved to: (.+?)\r?\n/;
+const REMINDER = /\s*<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/g;
+
+/** Text without its `<system-reminder>` blocks, which the host adds and re-sends. */
+function withoutReminders(text: string): string {
+  return text.replace(REMINDER, '');
+}
+
+/** Builds the entry list; `boundary()` marks where a compaction wrote kept messages again. */
+function collector() {
+  const entries: Entry[] = [];
+  const calls = new Map<string, Call>();
+  const beforeBoundary = new Set<string>();
+  const sinceBoundary = new Set<string>();
+  let afterBoundary = false;
+
+  return {
+    entries,
+    boundary(): void {
+      for (const key of sinceBoundary) beforeBoundary.add(key);
+      sinceBoundary.clear();
+      afterBoundary = true;
+    },
+    text(kind: 'prompt' | 'reply', raw: string, line?: number): void {
+      const text = withoutReminders(raw).trim();
+      if (!text) return;
+      const key = `${kind}\u0000${text}`;
+      if (afterBoundary && beforeBoundary.has(key)) return;
+      sinceBoundary.add(key);
+      entries.push({ n: entries.length + 1, ...(line !== undefined && { line }), kind, text });
+    },
+    call(id: string, tool: string, input: Record<string, unknown>, line?: number): void {
+      if (calls.has(id)) return;
+      const call: Call = { n: entries.length + 1, ...(line !== undefined && { line }), kind: 'call', id, tool, input };
+      calls.set(id, call);
+      entries.push(call);
+    },
+    result(id: string, text: string, isError: boolean): void {
+      const call = calls.get(id);
+      if (!call || call.result !== undefined) return;
+      call.result = withoutReminders(text);
+      if (isError) call.isError = true;
+      const saved = SAVED_TO.exec(text)?.[1];
+      if (saved) call.savedTo = saved.trim();
+    },
+  };
+}
+
 type Block = { type?: string; [field: string]: unknown };
 type Row = {
   type?: string;
@@ -34,15 +86,6 @@ type Row = {
   isCompactSummary?: boolean;
   message?: { content?: unknown };
 };
-
-const SAVED_TO = /Full output saved to: (.+?)\r?\n/;
-
-const REMINDER = /\s*<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>/g;
-
-/** Text without its `<system-reminder>` blocks, which the host adds and re-sends. */
-function withoutReminders(text: string): string {
-  return text.replace(REMINDER, '');
-}
 
 /** The text of a message or tool result content: a string, or text blocks joined. */
 function textOf(content: unknown): string {
@@ -54,22 +97,9 @@ function textOf(content: unknown): string {
     .join('\n');
 }
 
+/** Entries from a transcript file's text. */
 export function readTranscript(jsonl: string): Entry[] {
-  const entries: Entry[] = [];
-  const calls = new Map<string, Extract<Entry, { kind: 'call' }>>();
-  /** Prompts and replies seen before the latest compact boundary. */
-  const beforeBoundary = new Set<string>();
-  const sinceBoundary = new Set<string>();
-  let afterBoundary = false;
-
-  const addText = (kind: 'prompt' | 'reply', text: string, line: number): void => {
-    if (!text) return;
-    const key = `${kind}\u0000${text}`;
-    if (afterBoundary && beforeBoundary.has(key)) return;
-    sinceBoundary.add(key);
-    entries.push({ n: entries.length + 1, line, kind, text });
-  };
-
+  const c = collector();
   jsonl.split('\n').forEach((raw, index) => {
     const line = index + 1;
     let row: Row;
@@ -78,46 +108,39 @@ export function readTranscript(jsonl: string): Entry[] {
     } catch {
       return;
     }
-    if (row.type === 'system' && row.subtype === 'compact_boundary') {
-      for (const key of sinceBoundary) beforeBoundary.add(key);
-      sinceBoundary.clear();
-      afterBoundary = true;
-      return;
-    }
+    if (row.type === 'system' && row.subtype === 'compact_boundary') return c.boundary();
     if ((row.type !== 'user' && row.type !== 'assistant') || row.isMeta || row.isSidechain || row.isCompactSummary) return;
     const content = row.message?.content;
     const blocks: Block[] = Array.isArray(content) ? (content as Block[]) : [];
-
     if (row.type === 'user') {
       for (const block of blocks.filter((b) => b.type === 'tool_result')) {
-        const call = calls.get(String(block['tool_use_id']));
-        if (!call || call.result !== undefined) continue;
-        const text = textOf(block['content']);
-        call.result = withoutReminders(text);
-        if (block['is_error'] === true) call.isError = true;
-        const saved = SAVED_TO.exec(text)?.[1];
-        if (saved) call.savedTo = saved.trim();
+        c.result(String(block['tool_use_id']), textOf(block['content']), block['is_error'] === true);
       }
-      const typed = typeof content === 'string' ? content : textOf(blocks.filter((b) => b.type === 'text'));
-      addText('prompt', withoutReminders(typed).trim(), line);
+      c.text('prompt', typeof content === 'string' ? content : textOf(blocks.filter((b) => b.type === 'text')), line);
       return;
     }
-
-    addText('reply', textOf(blocks.filter((b) => b.type === 'text')).trim(), line);
+    c.text('reply', textOf(blocks.filter((b) => b.type === 'text')), line);
     for (const block of blocks.filter((b) => b.type === 'tool_use')) {
-      const id = String(block['id']);
-      if (calls.has(id)) continue;
-      const call: Extract<Entry, { kind: 'call' }> = {
-        n: entries.length + 1,
-        line,
-        kind: 'call',
-        id,
-        tool: String(block['name']),
-        input: (block['input'] as Record<string, unknown>) ?? {},
-      };
-      calls.set(id, call);
-      entries.push(call);
+      c.call(String(block['id']), String(block['name']), (block['input'] as Record<string, unknown>) ?? {}, line);
     }
   });
-  return entries;
+  return c.entries;
+}
+
+/** Entries from groups of session rows, each group read after a compaction boundary. */
+export function entriesFromGroups(groups: readonly (readonly Message[])[]): Entry[] {
+  const c = collector();
+  groups.forEach((rows, index) => {
+    if (index > 0) c.boundary();
+    for (const row of rows) {
+      for (const result of row.toolResults ?? []) c.result(result.tool_use_id, result.text, result.isError === true);
+      if (row.role === 'user') {
+        c.text('prompt', row.text);
+        continue;
+      }
+      c.text('reply', row.text);
+      for (const use of row.toolUses) c.call(use.tool_use_id, use.tool, (use.input as Record<string, unknown>) ?? {});
+    }
+  });
+  return c.entries;
 }

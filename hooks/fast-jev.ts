@@ -14,6 +14,16 @@ import { redactDeep } from '../src/redact.js';
 import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
 import { dropTransientReminders, foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
 import { DECISIONS_MODEL, wireFor, type JevProvider } from '../src/decisions.js';
+import { pruneArchives } from '../src/recall/archive.js';
+import {
+  answerRecall,
+  archiveSession,
+  RECALL_DESCRIPTION,
+  RECALL_INPUT_SCHEMA,
+  RECALL_MAX_AGE_MS,
+  RECALL_NAME,
+  recallRequest,
+} from '../src/recall/tool.js';
 import type { ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
@@ -77,6 +87,8 @@ export type HookConfig = CompactOptions & {
   model: string;
   compactionTimeoutMs: number;
   builtinFallback: BuiltinFallback;
+  /** Archive what each compaction receives and offer the recall tool (default true). */
+  recall: boolean;
   /** Model alias or id `oldProse: 'summarize'` writes its summary with, through the session's own client. */
   proseModel: string;
 };
@@ -164,6 +176,7 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     model: providerModel(provider, optionString(options, 'model')),
     compactionTimeoutMs: optionNumber(options, 'compactionTimeoutMs', HOOK_DEFAULTS.compactionTimeoutMs),
     builtinFallback: optionFallback(options),
+    recall: options['recall'] !== false,
     proseModel: optionString(options, 'proseModel') ?? HOOK_DEFAULTS.proseModel,
   };
   if (config.compactionTimeoutMs <= 0) config.compactionTimeoutMs = HOOK_DEFAULTS.compactionTimeoutMs;
@@ -517,16 +530,22 @@ type LogHost = UiLog & {
   };
 };
 
+/** Claude Code's config dir: `CLAUDE_CONFIG_DIR`, else `~/.claude`; undefined without a home. */
+export async function configDir($: Pick<LogHost, 'env'>): Promise<string | undefined> {
+  const explicit = await $.env.get('CLAUDE_CONFIG_DIR');
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'));
+  const base = explicit || (home ? `${home}/.claude` : undefined);
+  return base?.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
 /**
- * The plugin's own log, `<config dir>/fast-jev-compaction/compactions.log`, the
- * config dir being `CLAUDE_CONFIG_DIR` or `~/.claude`. The debug log exists only
- * under `--debug`, never in the desktop app, so each outcome is kept here too.
+ * The plugin's own log, `<config dir>/fast-jev-compaction/compactions.log`.
+ * The debug log exists only under `--debug`, never in the desktop app, so each
+ * outcome is kept here too.
  */
 export async function compactionLogPath($: Pick<LogHost, 'env'>): Promise<string | undefined> {
-  const configDir = await $.env.get('CLAUDE_CONFIG_DIR');
-  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'));
-  const base = configDir || (home ? `${home}/.claude` : undefined);
-  return base ? `${base.replace(/\\/g, '/').replace(/\/+$/, '')}/fast-jev-compaction/compactions.log` : undefined;
+  const base = await configDir($);
+  return base ? `${base}/fast-jev-compaction/compactions.log` : undefined;
 }
 
 // $.fs has no append, so a line is a read and a whole write: this session's
@@ -582,16 +601,67 @@ export function isHeadlessRefusal(error: unknown): boolean {
   return error instanceof Error && error.message.includes('not available in a headless');
 }
 
+type RecallHost = LogHost & {
+  fs: { list: (path: string) => Promise<readonly { name: string; kind: string; mtimeMs: number }[]> };
+  session: { id: () => Promise<string> };
+};
+
+/** The `$.fs` calls the recall archive makes. */
+function recallFs($: RecallHost) {
+  return {
+    list: (path: string) => $.fs.list(path),
+    read: (path: string) => $.fs.read(path),
+    write: (path: string, text: string) => $.fs.write(path, text),
+  };
+}
+
+/** Saves the rows a compaction received for the recall tool, before anything is cut; never throws. */
+async function archiveForRecall($: RecallHost, rows: readonly SessionMessage[]): Promise<void> {
+  try {
+    const base = await configDir($);
+    if (!base) return;
+    const saved = await archiveSession(recallFs($), base, await $.session.id(), rows);
+    if (saved.rows > 0) debugLog($, `recall: archived ${saved.rows} row(s) in ${saved.files} file(s)`);
+  } catch (error) {
+    debugLog($, `recall: archive not written (${error instanceof Error ? error.message : String(error)})`);
+  }
+}
+
 export const register: Register = (on: On, options: PluginOptions) => {
   const configured = resolveHookConfig(options);
   let compacting = false;
   let retryAtPercent = 0;
+  if (configured.recall) {
+    on('session.start', async ($, event, next) => {
+      const started = await next(event);
+      try {
+        await $.tool.register({ name: RECALL_NAME, description: RECALL_DESCRIPTION, inputSchema: RECALL_INPUT_SCHEMA });
+        const base = await configDir($);
+        if (base) void pruneArchives(recallFs($), base, Date.now(), RECALL_MAX_AGE_MS).catch(() => undefined);
+      } catch (error) {
+        debugLog($, `recall: tool not registered (${error instanceof Error ? error.message : String(error)})`);
+      }
+      return started;
+    });
+    // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
+    on('tool.call', { tool: 'mcp__fast-jev-compaction__recall' }, async ($, e) => {
+      try {
+        const live = await $.session.messages();
+        const request = recallRequest(e as Record<string, unknown>);
+        return { result: await answerRecall(recallFs($), await configDir($), await $.session.id(), live, request) };
+      } catch (error) {
+        return { result: `Recall failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+    });
+  }
 
   on('session.compact', async ($, event, next) => {
     if (event.agentId) return next(event);
     if (event.trigger === 'precompute') {
       return { skip: 'fast-jev-compaction does not handle speculative compactions' };
     }
+    // What this compaction may cut stays reachable through the recall tool.
+    if (configured.recall) await archiveForRecall($, event.messages);
 
     const giveUp = async (why: string) => {
       if (mayUseBuiltin(event.trigger, configured.builtinFallback)) {

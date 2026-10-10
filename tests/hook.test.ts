@@ -95,6 +95,7 @@ describe('hook config', () => {
   it('reads userConfig values and falls back to defaults', () => {
     expect(resolveHookConfig({})).toEqual({
       provider: 'jev',
+      recall: true,
       compactAtPercent: 60,
       minReductionRatio: 0.25,
       targetPercent: 45,
@@ -115,6 +116,7 @@ describe('hook config', () => {
       }),
     ).toEqual({
       provider: 'jev',
+      recall: true,
       apiKey: 'k',
       keepThreshold: 0.3,
       maxStateTokens: 1000,

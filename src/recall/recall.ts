@@ -259,7 +259,11 @@ function window(text: string, offset: number, room: number, ref: string): string
   return `${rest.slice(0, end)}[cut at ${next} of ${text.length} chars; continue: expand: ["${ref}"], offset: ${next}]`;
 }
 
-function runExpand(entries: readonly Entry[], refs: readonly (string | number)[], offset: number, deps: RecallDeps): string {
+/** The entries `refs` name (`#N`, `N` or a tool_use_id), once each, and the refs that name none. */
+export function resolveRefs(
+  entries: readonly Entry[],
+  refs: readonly (string | number)[],
+): { found: Entry[]; missing: string[] } {
   const found: Entry[] = [];
   const missing: string[] = [];
   for (const ref of refs) {
@@ -271,6 +275,11 @@ function runExpand(entries: readonly Entry[], refs: readonly (string | number)[]
     if (entry && !found.includes(entry)) found.push(entry);
     else if (!entry) missing.push(text);
   }
+  return { found, missing };
+}
+
+function runExpand(entries: readonly Entry[], refs: readonly (string | number)[], offset: number, deps: RecallDeps): string {
+  const { found, missing } = resolveRefs(entries, refs);
   const room = found.length > 0 ? share(found.length) : 0;
   const blocks = found.map((entry) => {
     if (entry.kind !== 'call') return `${heading(entry)}\n${window(entry.text, offset, room, `#${entry.n}`)}`;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readTranscript } from '../src/recall/transcript.js';
+import { entriesFromGroups, readTranscript } from '../src/recall/transcript.js';
+import { callRow, resultRow, userRow } from './helpers/rows.js';
 
 type Block = Record<string, unknown>;
 const row = (type: string, content: string | Block[], extra: Block = {}) =>
@@ -56,5 +57,30 @@ describe('readTranscript', () => {
   it('records the transcript line each entry starts on', () => {
     const entries = readTranscript(transcript());
     expect(entries.map((e) => e.line)).toEqual([2, 3, 3, 5, 14]);
+  });
+});
+
+describe('entriesFromGroups', () => {
+  const user = userRow;
+  const result = resultRow;
+  const assistant = (text: string, id: string) => callRow(id, text, { file_path: `${id}.ts` });
+
+  it('reads archived rows, then live rows, keeping the first result and counting a copied prompt once', () => {
+    const archived = [user('go'), assistant('Reading.', 't1'), result('t1', FULL)];
+    const live = [user('go'), assistant('Reading.', 't1'), result('t1', 'line\n[fast-jev-compaction truncated]'), user('next')];
+    const entries = entriesFromGroups([archived, live]);
+    expect(entries.map((e) => [e.n, e.kind, e.kind === 'call' ? e.id : e.text])).toEqual([
+      [1, 'prompt', 'go'],
+      [2, 'reply', 'Reading.'],
+      [3, 'call', 't1'],
+      [4, 'prompt', 'next'],
+    ]);
+    expect(entries[2]).toMatchObject({ result: FULL, input: { file_path: 't1.ts' } });
+    expect(entries[0]!.line).toBeUndefined();
+  });
+
+  it('finds where a large output was saved', () => {
+    const rows = [assistant('', 't2'), result('t2', `Output too large. Full output saved to: ${SAVED}\n\nPreview`)];
+    expect(entriesFromGroups([rows])[0]).toMatchObject({ kind: 'call', savedTo: SAVED });
   });
 });

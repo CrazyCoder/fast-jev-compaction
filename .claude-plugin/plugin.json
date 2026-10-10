@@ -70,6 +70,12 @@
       "description": "Minimum estimated character reduction required to replace history.",
       "default": 0.25
     },
+    "recall": {
+      "type": "boolean",
+      "title": "Recall tool",
+      "description": "Save what each compaction receives under <config dir>/fast-jev-compaction/recall/ and offer the model a recall tool to search and read it back, cut tool results included. Archives untouched for 30 days are emptied.",
+      "default": true
+    },
     "dropCalls": {
       "type": "boolean",
       "title": "Drop whole tool calls",
