@@ -1,3 +1,4 @@
+import { marker, PLUGIN_ID } from './brand.js';
 import { isHostText, stripHostText } from './host-text.js';
 import { sliceSurrogateSafe, truncate } from './state.js';
 import type { Message, OldProseMode } from './types.js';
@@ -20,7 +21,7 @@ export const SUMMARY_MAX_TOKENS = 3000;
 /** Characters of old transcript sent to the summarizer. */
 const SUMMARY_INPUT_CHARS = 120_000;
 
-const MARKER = /^\[fast-jev-compaction (digest|summary) of (\d+) earlier turns[^\]]*\]\n?/;
+const MARKER = new RegExp(`^\\[${PLUGIN_ID} (digest|summary) of (\\d+) earlier turns[^\\]]*\\]\\n?`);
 const ACK_PREFIX = 'Understood. Continuing from the earlier-turns ';
 const REFERENCED = 'Referenced: ';
 
@@ -242,9 +243,9 @@ export function buildDigest(old: readonly Message[], options: DigestOptions = {}
   const references = collectReferences(turns.map((turn) => turn.text).join('\n'));
   const merged = [...new Set([...references, ...prior.references])].slice(0, MAX_REFERENCES);
   const footer = merged.length > 0 ? `${REFERENCED}${merged.join(', ')}` : '';
-  const header = `[fast-jev-compaction digest of ${totalTurns} earlier turns; tool calls, results and intermediate narration were dropped${
-    options.recall ? RECALL_HINT : ''
-  }]`;
+  const header = marker(
+    `digest of ${totalTurns} earlier turns; tool calls, results and intermediate narration were dropped${options.recall ? RECALL_HINT : ''}`,
+  );
 
   const [first = '', ...rest] = entries;
   let omitted = prior.omitted;
@@ -366,7 +367,7 @@ export async function condenseOldProse(
       ).trim();
       if (reply) {
         const turns = priorOf(split.old).turns + groupTurns(split.old).length;
-        text = `[fast-jev-compaction summary of ${turns} earlier turns${options.recallNotes === true ? RECALL_HINT : ''}]\n${reply}`;
+        text = `${marker(`summary of ${turns} earlier turns${options.recallNotes === true ? RECALL_HINT : ''}`)}\n${reply}`;
         applied = 'summarize';
       }
     } catch {

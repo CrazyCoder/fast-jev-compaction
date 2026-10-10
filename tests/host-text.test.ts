@@ -12,7 +12,7 @@ import {
   type JevAsker,
   type Message,
 } from '../src/index.js';
-import { summarize } from '../hooks/fast-jev.js';
+import { summarize } from '../hooks/jetcompact.js';
 
 const user = (text: string): Message => ({ role: 'user', text, toolUses: [] });
 const assistant = (text: string): Message => ({ role: 'assistant', text, toolUses: [] });

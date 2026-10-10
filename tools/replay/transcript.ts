@@ -32,7 +32,7 @@ export interface ParsedTranscript {
 }
 
 const ENTRY = /^(t\d+):(.+?):(\w+)\/call=([\d.]+)\/result=([\d.]+)$/;
-const DECISIONS = /^fast-jev-compaction: decisions(?: \((\d+)\/(\d+)\))?: (.*)$/s;
+const DECISIONS = /^jetcompact: decisions(?: \((\d+)\/(\d+)\))?: (.*)$/s;
 
 function isRecord(value: unknown): value is Block {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

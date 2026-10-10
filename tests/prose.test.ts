@@ -201,13 +201,13 @@ describe('condenseOldProse', () => {
     expect(prompts[1]).toContain('SUMMARY TEXT');
     expect(parseCondensed(second.messages[0]!)!.turns).toBe(8);
     expect(second.messages.filter((m) => parseCondensed(m))).toHaveLength(1);
-    expect(first.messages[0]!.text.split('\n')[0]).toBe('[fast-jev-compaction summary of 6 earlier turns]');
+    expect(first.messages[0]!.text.split('\n')[0]).toBe('[jetcompact summary of 6 earlier turns]');
   });
 
   it('names the recall tool in a summary header when recall is on, and still reads as a summary', async () => {
     const recalled = await condenseOldProse(history(10), { oldProse: 'summarize', recentTurns: 4, recallNotes: true }, async () => 'S');
     expect(recalled.messages[0]!.text).toBe(
-      '[fast-jev-compaction summary of 6 earlier turns; the recall tool reads them back from the transcript (query, expand)]\nS',
+      '[jetcompact summary of 6 earlier turns; the recall tool reads them back from the transcript (query, expand)]\nS',
     );
     expect(parseCondensed(recalled.messages[0]!)).toMatchObject({ kind: 'summary', turns: 6, body: 'S' });
   });
@@ -244,7 +244,7 @@ describe('compact with oldProse', () => {
     expect(result.stats.oldProse).toBe('digest');
     expect(result.stats.oldProseReplaced).toBe(9 * 4);
     expect(result.stats.messagesBefore).toBe(messages.length);
-    expect(result.messages[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns/);
+    expect(result.messages[0]!.text).toMatch(/^\[jetcompact digest of 9 earlier turns/);
     expect(orphans(result.messages)).toEqual([]);
     const pinnedTail = result.messages.slice(-4);
     expect(pinnedTail).toEqual(messages.slice(-4));

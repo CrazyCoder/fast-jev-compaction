@@ -58,7 +58,7 @@ test('deadline skips plugin compaction; late responses cannot install it', async
   await clock.advance(1);
   const result = await pending;
   expect(state.summaries).toBe(0);
-  expect(result.skip).toBe('fast-jev-compaction: Jev compaction timed out after 15000ms; conversation left unchanged');
+  expect(result.skip).toBe('jetcompact: Jev compaction timed out after 15000ms; conversation left unchanged');
 
   state.stall = false;
   const retried = await $.session.compact({ trigger: 'plugin', messages });

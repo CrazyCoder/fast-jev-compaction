@@ -14,7 +14,7 @@ import {
   summarize,
   toSessionMessages,
   withCompactionDeadline,
-} from '../hooks/fast-jev.ts';
+} from '../hooks/jetcompact.ts';
 import { parseEnv } from '../src/dotenv.js';
 import {
   applyDecisions,
@@ -317,11 +317,11 @@ describe('session message mapping', () => {
     expect(out[0]).toBe(messages[0]);
     expect(out[1]?.handle).toBeUndefined();
     expect(out[1]?.toolUses[0]?.text).toMatch(
-      new RegExp(`^${'x'.repeat(300)}\\n\\[fast-jev-compaction truncated 1700 chars`),
+      new RegExp(`^${'x'.repeat(300)}\\n\\[jetcompact truncated 1700 chars`),
     );
     expect(out[2]?.handle).toBeUndefined();
     expect(out[2]?.toolResults?.[0]?.text).toMatch(
-      new RegExp(`^${'x'.repeat(300)}\\n\\[fast-jev-compaction truncated 1700 chars`),
+      new RegExp(`^${'x'.repeat(300)}\\n\\[jetcompact truncated 1700 chars`),
     );
     expect(out[2]?.toolResults?.[0]).toMatchObject({ tool_use_id: 'tool-1', isError: false });
     expect(out[3]).toBe(messages[3]);
@@ -350,7 +350,7 @@ describe('compactSession', () => {
     expect(bodies).toHaveLength(1);
     expect(JSON.parse(bodies[0]!).model).toBe('jev-x');
     expect(output.decisions.map((d) => d.action)).toEqual(['drop_call', 'keep']);
-    expect(messages[0]!.text).toMatch(/^\[fast-jev-compaction note\] .*1 tool calls dropped/);
+    expect(messages[0]!.text).toMatch(/^\[jetcompact note\] .*1 tool calls dropped/);
     expect(withoutCompactionNote(messages).map((m) => m.handle)).toEqual(['h-0', 'h-tool-2', 'r-tool-2', 'h-5', 'h-6']);
     expect(summarize(output)).toMatch(/^\d+% reduction; 1 kept, 1 call_dropped; state ~\d+ tokens \(full\) in 1 request\(s\)$/);
     expect(decisionLog(output)).toBe('t1:Read:drop_call/call=0.10/result=0.10 t2:Bash:keep/call=0.90/result=0.90');
@@ -570,10 +570,10 @@ async function compactWith(
 describe('compaction output on screen', () => {
   it('sends every log line to the debug log and shows one short toast', async () => {
     const cases = [
-      { trigger: 'manual', fetch: jevFetch(() => 0.1), toast: /^fast-jev: compacted, \d+% smaller \(\d+\/7 messages\)$/ },
-      { trigger: 'manual', fetch: jevFetch(() => 0.9), toast: /^fast-jev: not compacted \(below 25% minimum\)$/ },
-      { trigger: 'auto', fetch: jevFetch(() => 0.9), toast: /^fast-jev: built-in summary \(below 25% minimum\)$/ },
-      { trigger: 'auto', fetch: failing, toast: /^fast-jev: built-in summary \(.*500.*\)$/ },
+      { trigger: 'manual', fetch: jevFetch(() => 0.1), toast: /^jetcompact: compacted, \d+% smaller \(\d+\/7 messages\)$/ },
+      { trigger: 'manual', fetch: jevFetch(() => 0.9), toast: /^jetcompact: not compacted \(below 25% minimum\)$/ },
+      { trigger: 'auto', fetch: jevFetch(() => 0.9), toast: /^jetcompact: built-in summary \(below 25% minimum\)$/ },
+      { trigger: 'auto', fetch: failing, toast: /^jetcompact: built-in summary \(.*500.*\)$/ },
     ];
     for (const c of cases) {
       const { notices, sinks, toasts } = await compactWith(c.trigger, c.fetch, { keepMode: 'threshold', dropCalls: true });
@@ -612,7 +612,7 @@ describe('built-in summary fallback', () => {
     const { out, delegated, notices } = await compactWith('manual', jevFetch(() => 0.9));
     expect(delegated).toBe(false);
     expect(out).toEqual({
-      skip: expect.stringMatching(/^fast-jev-compaction: below 25% minimum: 0% reduction; .*; conversation left as it is$/),
+      skip: expect.stringMatching(/^jetcompact: below 25% minimum: 0% reduction; .*; conversation left as it is$/),
     });
     expect(notices.at(-1)).toMatch(/^not compacted, no built-in summary \(below 25% minimum/);
   });
@@ -713,7 +713,7 @@ describe('auto-compaction at compactAtPercent', () => {
   it('queues /compact where a headless (SDK) session refuses $.session.compact', async () => {
     const t = turnEnd(async () => {
       throw new Error(
-        'fast-jev-compaction: $.session.compact: not available in a headless (-p / SDK) session yet: compaction here runs inside a turn (a /compact prompt); catch it and carry on',
+        'jetcompact: $.session.compact: not available in a headless (-p / SDK) session yet: compaction here runs inside a turn (a /compact prompt); catch it and carry on',
       );
     });
     expect(await t.run()).toEqual({ text: 'answer' });
@@ -769,9 +769,9 @@ describe('old prose through the hook', () => {
 
   it('digest replaces the old prefix and leaves the recent turns', async () => {
     const { out, messages } = await run({ oldProse: 'digest', recentTurns: 3 });
-    expect(out.messages[0]!.text).toMatch(/^\[fast-jev-compaction note\] .*\d+ older messages condensed into a digest/);
+    expect(out.messages[0]!.text).toMatch(/^\[jetcompact note\] .*\d+ older messages condensed into a digest/);
     const history = withoutCompactionNote(out.messages);
-    expect(history[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns.*; the recall tool reads them back/);
+    expect(history[0]!.text).toMatch(/^\[jetcompact digest of 9 earlier turns.*; the recall tool reads them back/);
     expect(out.messages.at(-1)!.text).toBe(messages.at(-1)!.text);
     expect(history).toHaveLength(2 + 3 * 2);
   });
@@ -785,13 +785,13 @@ describe('old prose through the hook', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ model: 'sonnet', maxTokens: 3000 });
     expect(withoutCompactionNote(out.messages)[0]!.text).toBe(
-      '[fast-jev-compaction summary of 9 earlier turns; the recall tool reads them back from the transcript (query, expand)]\nMODEL SUMMARY',
+      '[jetcompact summary of 9 earlier turns; the recall tool reads them back from the transcript (query, expand)]\nMODEL SUMMARY',
     );
   });
 
   it('summarize falls back to the digest when the model does not answer', async () => {
     const { out } = await run({ oldProse: 'summarize', recentTurns: 3 }, async () => null);
-    expect(withoutCompactionNote(out.messages)[0]!.text).toMatch(/^\[fast-jev-compaction digest of 9 earlier turns/);
+    expect(withoutCompactionNote(out.messages)[0]!.text).toMatch(/^\[jetcompact digest of 9 earlier turns/);
   });
 
   it('keep makes no model call', async () => {
@@ -803,7 +803,7 @@ describe('old prose through the hook', () => {
     expect(called).toBe(false);
   });
 
-  const digestMarker = /^\[fast-jev-compaction digest of (\d+) earlier turns/;
+  const digestMarker = /^\[jetcompact digest of (\d+) earlier turns/;
   // A result larger than all the prose, which Jev cuts: verbatim prose clears the guards.
   const shrinkable = () => [
     ...turns(12),
@@ -840,7 +840,7 @@ describe('old prose through the hook', () => {
 
   it('starts with the digest once the conversation holds one', async () => {
     const earlier = [
-      message('user', '[fast-jev-compaction digest of 5 earlier turns; tool calls, results and intermediate narration were dropped]\n• first prompt: hi'),
+      message('user', '[jetcompact digest of 5 earlier turns; tool calls, results and intermediate narration were dropped]\n• first prompt: hi'),
       message('assistant', 'Understood. Continuing from the earlier-turns digest above.'),
     ];
     const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
@@ -889,7 +889,7 @@ describe('old prose through the hook', () => {
   });
 
   it('starts verbatim after a summary, which is not a digest', async () => {
-    const summary = '[fast-jev-compaction summary of 5 earlier turns]\nWe set up the build.';
+    const summary = '[jetcompact summary of 5 earlier turns]\nWe set up the build.';
     const earlier = [message('user', summary), message('assistant', 'Understood. Continuing from the earlier-turns summary above.')];
     const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
     expect(withoutCompactionNote(out.messages!)[0]!.text).toBe(summary);

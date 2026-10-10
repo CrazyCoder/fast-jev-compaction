@@ -8,6 +8,7 @@ import type {
   TurnCompleteInput,
 } from 'claude-code';
 
+import { PLUGIN_ID } from '../src/brand.js';
 import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
@@ -340,7 +341,7 @@ export async function compactSession(
  * after the compact boundary. With handles, kept tool_result records keep a
  * parentUuid behind the boundary and kept assistant records keep their
  * message.id, so `--resume` walks back into the full pre-compaction history
- * (fast-jev-compaction#89, anthropics/claude-code#95328). Costs each record its
+ * (tamaratran/fast-jev-compaction#89, anthropics/claude-code#95328). Costs each record its
  * group of hidden entries (skill bodies, prompts typed while a tool ran,
  * attachments, images); the hook folds those back as text first (src/hidden.ts).
  *
@@ -565,13 +566,13 @@ export async function configDir($: Pick<LogHost, 'env'>): Promise<string | undef
 }
 
 /**
- * The plugin's own log, `<config dir>/fast-jev-compaction/compactions.log`.
+ * The plugin's own log, `<config dir>/jetcompact/compactions.log`.
  * The debug log exists only under `--debug`, never in the desktop app, so each
  * outcome is kept here too.
  */
 export async function compactionLogPath($: Pick<LogHost, 'env'>): Promise<string | undefined> {
   const base = await configDir($);
-  return base ? `${base}/fast-jev-compaction/compactions.log` : undefined;
+  return base ? `${base}/${PLUGIN_ID}/compactions.log` : undefined;
 }
 
 // $.fs has no append, so a line is a read and a whole write: this session's
@@ -612,7 +613,7 @@ async function notify(
   toast: string,
 ): Promise<void> {
   debugLog($, detail);
-  $.ui.toast(`fast-jev: ${toast}`, { timeoutMs: 8_000 });
+  $.ui.toast(`${PLUGIN_ID}: ${toast}`, { timeoutMs: 8_000 });
   await appendCompactionLog($, `${trigger} ${detail}`);
 }
 
@@ -686,12 +687,12 @@ export const register: Register = (on: On, options: PluginOptions) => {
     // compaction note send the model to recall, which it can call only once
     // loaded. The description never changes, so the prompt cache holds it.
     // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
-    on('tool.describe', { tool: 'mcp__fast-jev-compaction__recall' }, async (_, e, next) => ({
+    on('tool.describe', { tool: 'mcp__jetcompact__recall' }, async (_, e, next) => ({
       ...(await next(e)),
       isDeferred: false,
     }));
     // RECALL_TOOL, spelled out so `claude plugin validate` can read the filter.
-    on('tool.call', { tool: 'mcp__fast-jev-compaction__recall' }, async ($, e) => {
+    on('tool.call', { tool: 'mcp__jetcompact__recall' }, async ($, e) => {
       try {
         const base = await configDir($);
         if (!base) return { result: 'Recall failed: no config dir (CLAUDE_CONFIG_DIR, HOME or USERPROFILE).' };
@@ -709,7 +710,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
   on('session.compact', async ($, event, next) => {
     if (event.agentId) return next(event);
     if (event.trigger === 'precompute') {
-      return { skip: 'fast-jev-compaction does not handle speculative compactions' };
+      return { skip: `${PLUGIN_ID} does not handle speculative compactions` };
     }
     // Cut notes point at the recall tool from now on: have its Node downloaded
     // before the first call, without holding up the compaction.
@@ -727,7 +728,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
       }
       await notify($, event.trigger, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
       const reason = why.length > 200 ? `${why.slice(0, 200)}…` : why;
-      return { skip: `fast-jev-compaction: ${reason}; conversation left as it is` };
+      return { skip: `${PLUGIN_ID}: ${reason}; conversation left as it is` };
     };
     // Why verbatim prose was refused, once the digest is being tried.
     let verbatimRefused = '';
@@ -829,7 +830,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
       const why = afterVerbatim(error instanceof Error ? error.message : String(error));
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
         await notify($, event.trigger, `not compacted (${why})`, `not compacted (${toastReason(why)})`);
-        return { skip: `fast-jev-compaction: ${why}; conversation left unchanged` };
+        return { skip: `${PLUGIN_ID}: ${why}; conversation left unchanged` };
       }
       return giveUp(why);
     }

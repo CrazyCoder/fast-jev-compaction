@@ -1,30 +1,32 @@
-# fast-jev-compaction
+# JetCompact
 
 Claude Code plugin that replaces the compaction summary with Jev decisions. The
 newest turns stay verbatim, every older tool call and result is scored by
 [Jev](https://typesafe.ai) (or, opt-in, OpenAI's Decisions API) and kept or cut
 accordingly, host notices are trimmed, and old prose can be condensed into a
-digest.
+digest. Nothing is lost: the `recall` tool reads back what a compaction cut, and
+searches your past sessions.
 
-This is the CrazyCoder fork. It combines the most useful work from the upstream
-project's many forks; the full lineage is under
-[Features and credits](#features-and-credits).
+JetCompact is a fork of
+[fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction). It
+combines the most useful work from that project's many forks with its own; the
+full lineage is under [Features and credits](#features-and-credits).
 
-## Added in this fork
+## Added in JetCompact
 
 | Feature | What it does | Origin |
 | -- | -- | -- |
 | Quiet output | Diagnostics, including the per-call decisions, go to the debug log only; you see one short toast instead of a wall of text in the transcript | k-metehan (6bb138d) |
-| Compaction log file | Each outcome, and each `/compact` queued in a headless session, is one line in `~/.claude/fast-jev-compaction/compactions.log` (newest 200), since the desktop app has no `--debug` | k-metehan (aa912a9) |
-| Hidden content folded back | Kept messages go back without their engine handles so `--resume` starts at the compaction ([#89](https://github.com/tamaratran/fast-jev-compaction/issues/89)). That drops what Claude Code keeps beside each message: skill bodies, prompts typed while a tool ran, attachments, images, ToolSearch-loaded tools. The hook reads them from the conversation's API form and folds them back as text (placeholders for images and deferred tools), counted in the size guards | This fork. k-metehan identified the loss and keeps handles instead, which brings #89 back |
+| Compaction log file | Each outcome, and each `/compact` queued in a headless session, is one line in `~/.claude/jetcompact/compactions.log` (newest 200), since the desktop app has no `--debug` | k-metehan (aa912a9) |
+| Hidden content folded back | Kept messages go back without their engine handles so `--resume` starts at the compaction ([#89](https://github.com/tamaratran/fast-jev-compaction/issues/89)). That drops what Claude Code keeps beside each message: skill bodies, prompts typed while a tool ran, attachments, images, ToolSearch-loaded tools. The hook reads them from the conversation's API form and folds them back as text (placeholders for images and deferred tools), counted in the size guards | JetCompact. k-metehan identified the loss and keeps handles instead, which brings #89 back |
 | Request policy | At most `maxConcurrentRequests` (4) Jev requests at once; one retry on 429/5xx; no further requests after 401/403 or no answer; a failed request's calls are kept and the rest is applied, with the reason in the log | k-metehan (de21417, 06163e6, b2a3d4c) |
 | `/compact` instructions | Text typed after `/compact` reaches Jev's goal (first 2000 characters) | k-metehan (3019dab, 10e00ab) |
 | OpenAI Decisions provider | `provider: "openai"` asks [OpenAI's Decisions API](https://developers.openai.com/api/docs/guides/decisions) (`gpt-6-luna`, key from `OPENAI_API_KEY`) instead of Jev; Jev stays the default, and the Jev `apiKey`/`baseUrl` never reach OpenAI | [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction) (235a6c6) |
-| Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader: this fork |
-| Past-session search | `sessions` searches the other sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. The current session's matches are counted on a last line. With [qmd](https://github.com/tobi/qmd) installed, the search goes through an index of the sessions, which `/recall-index` builds for all projects or the ones you name by name, path or folder. Details: [Searching past sessions](#searching-past-sessions) | This fork |
-| Recall guidance | The model is told what compaction cut and how to get it back, at the points where it matters and never on every prompt: the recall tool stays loaded instead of behind ToolSearch, each cut note names the `recall expand` call that returns the rest, a digest or summary says recall reads its turns back, and one note at the top of the compacted history says what this compaction cut and to use recall before re-running a tool or saying something is gone. Each compaction replaces that note. Details: [What the model is told](hooks/README.md#what-the-model-is-told) | This fork |
-| Adaptive prose digest | Each compaction keeps your old prose verbatim while that frees enough. When it would be refused, as happens after two or three compactions in a long session, the prose older than `recentTurns` becomes a digest (cut results keep 100-character heads), and later compactions start with the digest, so multi-day sessions keep compacting instead of getting stuck. Pros, cons and options: [Adaptive prose digest](#adaptive-prose-digest) | This fork; the digest is QuanticPotatoes' `oldProse: digest` |
-| Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | This fork |
+| Recall tool | The model gets a `recall` tool over the session transcript, which compaction never deletes from: search it (`query`, ranked or regex), read entries in full by `#N` or tool_use_id (`expand`, the uncut result, following outputs Claude Code saved to a file), list them (`range`), or see which files the session changed and every call on a file (`touched`), in answers of at most 48k characters; `agent` does the same inside subagent transcripts. It runs on a pinned Node that `tools/node.cmd` downloads and verifies on first use, so nothing needs installing. `recall: false` turns it off | Ranking, regex mode and the touched view from [pi-vcc](https://github.com/sting8k/pi-vcc); answer budget from [pi-blackhole](https://github.com/k0valik/pi-blackhole); Node wrapper from [intellij-community](https://github.com/JetBrains/intellij-community/tree/master/tools); transcript reader: JetCompact |
+| Past-session search | `sessions` searches the other sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. The current session's matches are counted on a last line. With [qmd](https://github.com/tobi/qmd) installed, the search goes through an index of the sessions, which `/recall-index` builds for all projects or the ones you name by name, path or folder. Details: [Searching past sessions](#searching-past-sessions) | JetCompact |
+| Recall guidance | The model is told what compaction cut and how to get it back, at the points where it matters and never on every prompt: the recall tool stays loaded instead of behind ToolSearch, each cut note names the `recall expand` call that returns the rest, a digest or summary says recall reads its turns back, and one note at the top of the compacted history says what this compaction cut and to use recall before re-running a tool or saying something is gone. Each compaction replaces that note. Details: [What the model is told](hooks/README.md#what-the-model-is-told) | JetCompact |
+| Adaptive prose digest | Each compaction keeps your old prose verbatim while that frees enough. When it would be refused, as happens after two or three compactions in a long session, the prose older than `recentTurns` becomes a digest (cut results keep 100-character heads), and later compactions start with the digest, so multi-day sessions keep compacting instead of getting stuck. Pros, cons and options: [Adaptive prose digest](#adaptive-prose-digest) | JetCompact; the digest is QuanticPotatoes' `oldProse: digest` |
+| Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | JetCompact |
 
 k-metehan is
 [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction).
@@ -42,16 +44,16 @@ and your key where Claude Code runs, e.g. in `~/.claude/settings.json`:
 ```
 
 ```sh
-claude plugin marketplace add CrazyCoder/fast-jev-compaction
-claude plugin install fast-jev-compaction@crazycoder
+claude plugin marketplace add CrazyCoder/jetcompact
+claude plugin install jetcompact@crazycoder
 ```
 
 Restart Claude Code or run `/reload-plugins`. `/compact` and auto-compaction now
 go through Jev; a one-line toast reports the outcome
-(`fast-jev: compacted, N% smaller`, `built-in summary (…)`, or
+(`jetcompact: compacted, N% smaller`, `built-in summary (…)`, or
 `not compacted (…)`). The details, including the per-call decisions, go to the
 debug log only (`claude --debug`), never into the transcript, and each outcome
-is also one line in `~/.claude/fast-jev-compaction/compactions.log`.
+is also one line in `~/.claude/jetcompact/compactions.log`.
 
 **Updating.** Claude Code updates a plugin only when its version changes. Set
 `autoUpdate: true` on the marketplace entry, or run
@@ -67,13 +69,13 @@ takes effect in new sessions, and in open ones after `/reload-plugins`, with no
 version bump or reinstall.
 
 ```sh
-claude plugin marketplace add /path/to/fast-jev-compaction
-claude plugin install fast-jev-compaction@crazycoder
+claude plugin marketplace add /path/to/jetcompact
+claude plugin install jetcompact@crazycoder
 ```
 
 Disable any other install of the plugin first
-(`claude plugin disable fast-jev-compaction@<marketplace>`), so only one
-compaction hook runs.
+(`claude plugin disable jetcompact@<marketplace>`), so only one compaction hook
+runs.
 
 ## Configure
 
@@ -83,7 +85,7 @@ people touch:
 ```json
 {
   "pluginConfigs": {
-    "fast-jev-compaction@crazycoder": {
+    "jetcompact@crazycoder": {
       "options": {
         "compactAtPercent": 60,
         "recentTurns": 8,
@@ -182,9 +184,9 @@ original message, call and result back from the transcript.
 | `minReductionRatio`, `targetPercent` | The guards whose refusal triggers the switch (0.25, 45) |
 | `recall` | Keep it on (the default) so the model can read digested turns back |
 
-Each outcome line in `~/.claude/fast-jev-compaction/compactions.log` names the
-prose mode used (`old prose digest: …`), and ends with
-`verbatim prose was refused (…)` on the compaction that switched.
+Each outcome line in `~/.claude/jetcompact/compactions.log` names the prose mode
+used (`old prose digest: …`), and ends with `verbatim prose was refused (…)` on
+the compaction that switched.
 
 ## Searching past sessions
 
@@ -204,11 +206,11 @@ There are two ways to search, and recall picks one for you:
 - **Session index**: with [qmd](https://github.com/tobi/qmd) installed
   (`npm install -g @tobilu/qmd`; recall never installs it), each session is
   exported as markdown (prompts, replies, calls with the head of their results)
-  to `~/.claude/fast-jev-compaction/sessions/` and indexed in a qmd index of its
-  own, `fast-jev-sessions`, apart from your other qmd collections. Searches
-  across many projects then stay fast, and hits are ranked across sessions. The
-  exports and the index are readable by you only, and an export goes when Claude
-  Code deletes its transcript.
+  to `~/.claude/jetcompact/sessions/` and indexed in a qmd index of its own,
+  `jetcompact-sessions`, apart from your other qmd collections. Searches across
+  many projects then stay fast, and hits are ranked across sessions. The exports
+  and the index are readable by you only, and an export goes when Claude Code
+  deletes its transcript.
 
 Without any command, the first cross-session search builds the index for all
 projects in the background (that search is answered by the scan), and every
@@ -269,12 +271,12 @@ Lineage:
 [ferrisworks/fast-jev-compaction](https://github.com/ferrisworks/fast-jev-compaction)
 (integration fork that merged about 13 of them) →
 [QuanticPotatoes/fast-jev-compaction](https://github.com/QuanticPotatoes/fast-jev-compaction)
-→ this fork, which also takes ideas and code from
+→ JetCompact, which also takes ideas and code from
 [k-metehan/fast-jev-compaction](https://github.com/k-metehan/fast-jev-compaction)
 and
 [deadczarvc-labs/jev-factkeep-compaction](https://github.com/deadczarvc-labs/jev-factkeep-compaction).
 Thanks to all of them, and to the authors of the upstream PRs linked below. What
-this fork adds is listed under [Added in this fork](#added-in-this-fork).
+JetCompact adds is listed under [Added in JetCompact](#added-in-jetcompact).
 
 ### Inherited from QuanticPotatoes and ferrisworks
 
@@ -318,7 +320,7 @@ this fork adds is listed under [Added in this fork](#added-in-this-fork).
 
 ### Compared
 
-|  | upstream 0.3.0 | ferrisworks 0.5.4 | QuanticPotatoes 0.8.0 | this fork |
+|  | upstream 0.3.0 | ferrisworks 0.5.4 | QuanticPotatoes 0.8.0 | JetCompact 0.10.0 |
 | -- | -- | -- | -- | -- |
 | Tool calls kept | Absolute 0.5 threshold | Same | Rank within token budgets | Same |
 | Dropped calls | Deleted | Stub note | Stub note | Stub note |

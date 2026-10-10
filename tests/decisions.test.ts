@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getApiKey, jevAsker, resolveHookConfig } from '../hooks/fast-jev.ts';
+import { getApiKey, jevAsker, resolveHookConfig } from '../hooks/jetcompact.ts';
 import {
   buildDecisionsRequest,
   DECISIONS_MODEL,

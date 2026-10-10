@@ -1,7 +1,7 @@
 {
-  "name": "fast-jev-compaction",
-  "version": "0.9.0",
-  "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
+  "name": "jetcompact",
+  "version": "0.10.0",
+  "description": "JetCompact: verbatim Jev-guided compaction for Claude Code, with a recall tool that reads back what compaction cut and searches past sessions.",
   "license": "MIT",
   "userConfig": {
     "provider": {
@@ -79,7 +79,7 @@
     "sessionIndex": {
       "type": "string",
       "title": "Session index",
-      "description": "auto: when qmd is installed, recall's search across past sessions uses a qmd index of them (markdown copies under <config dir>/fast-jev-compaction/sessions/, a qmd index named fast-jev-sessions); off: it always scans the transcripts.",
+      "description": "auto: when qmd is installed, recall's search across past sessions uses a qmd index of them (markdown copies under <config dir>/jetcompact/sessions/, a qmd index named jetcompact-sessions); off: it always scans the transcripts.",
       "default": "auto"
     },
     "dropCalls": {
@@ -172,7 +172,7 @@
     }
   },
   "author": {
-    "name": "tamaratran",
-    "url": "https://github.com/tamaratran"
+    "name": "CrazyCoder",
+    "url": "https://github.com/CrazyCoder"
   }
 }

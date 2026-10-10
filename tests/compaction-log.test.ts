@@ -6,10 +6,10 @@ import {
   jevAsker,
   register,
   summarize,
-} from '../hooks/fast-jev.ts';
+} from '../hooks/jetcompact.ts';
 import { JevTransportError } from '../src/index.js';
 
-const LOG = '/home/me/.claude/fast-jev-compaction/compactions.log';
+const LOG = '/home/me/.claude/jetcompact/compactions.log';
 
 function fsHost(files: Map<string, string>, env: Record<string, string> = { HOME: '/home/me' }) {
   const debug: string[] = [];
@@ -186,8 +186,8 @@ describe('compaction log file', () => {
   it('lives under CLAUDE_CONFIG_DIR, else HOME or USERPROFILE /.claude', async () => {
     const at = (env: Record<string, string>) => compactionLogPath({ env: { get: async (name: string) => env[name] } });
     expect(await at({ HOME: '/home/me' })).toBe(LOG);
-    expect(await at({ USERPROFILE: 'C:\\Users\\me' })).toBe('C:/Users/me/.claude/fast-jev-compaction/compactions.log');
-    expect(await at({ HOME: '/home/me', CLAUDE_CONFIG_DIR: '/cfg/' })).toBe('/cfg/fast-jev-compaction/compactions.log');
+    expect(await at({ USERPROFILE: 'C:\\Users\\me' })).toBe('C:/Users/me/.claude/jetcompact/compactions.log');
+    expect(await at({ HOME: '/home/me', CLAUDE_CONFIG_DIR: '/cfg/' })).toBe('/cfg/jetcompact/compactions.log');
     expect(await at({})).toBeUndefined();
   });
 

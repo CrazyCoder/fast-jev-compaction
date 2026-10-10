@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { register } from '../hooks/fast-jev.ts';
+import { register } from '../hooks/jetcompact.ts';
 
 describe('turn.complete in a headless session', () => {
   it('stops retrying after the host says compact is unavailable', async () => {
@@ -30,7 +30,7 @@ describe('turn.complete in a headless session', () => {
     expect(compacts).toBe(1);
     expect(queued).toBe(1);
     expect(logs).toEqual([]);
-    expect(files.get('/home/me/.claude/fast-jev-compaction/compactions.log')).toMatch(
+    expect(files.get('/home/me/.claude/jetcompact/compactions.log')).toMatch(
       /^\S+Z auto-compact at 70%: headless session, queued \/compact\n$/,
     );
   });

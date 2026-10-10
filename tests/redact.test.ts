@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { jevAsker, withoutHandles } from '../hooks/fast-jev.js';
+import { jevAsker, withoutHandles } from '../hooks/jetcompact.js';
 import { REDACTED, redactDeep, redactSecrets } from '../src/redact.js';
 
 // Fake credentials, assembled at run time so no credential-shaped literal sits in the repo.

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { RECALL_MAX_CHARS, runRecall } from '../src/recall/recall.js';
+import { PLUGIN_ID } from '../src/brand.js';
+import { RECALL_MAX_CHARS, RECALL_TOOL, runRecall } from '../src/recall/recall.js';
 import type { Entry } from '../src/recall/transcript.js';
+
+it('spells the recall tool name from the plugin id', () => {
+  expect(RECALL_TOOL).toBe(`mcp__${PLUGIN_ID}__recall`);
+});
 
 let n = 0;
 const prompt = (text: string): Entry => ({ n: ++n, kind: 'prompt', text });
@@ -107,7 +112,7 @@ describe('recall query', () => {
     n = 0;
     const entries = [
       call('t1', 'Edit', { file_path: 'a.ts', old_string: `${'x'.repeat(500)} NEEDLE here` }, 'ok'),
-      call('t2', 'mcp__fast-jev-compaction__recall', { query: 'NEEDLE' }, 'earlier answer about NEEDLE'),
+      call('t2', 'mcp__jetcompact__recall', { query: 'NEEDLE' }, 'earlier answer about NEEDLE'),
       call('t3', 'mcp__notes__recall', { query: 'NEEDLE' }, 'another server finds NEEDLE'),
     ];
     const out = runRecall(entries, { query: 'NEEDLE' });

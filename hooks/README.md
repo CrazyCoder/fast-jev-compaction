@@ -1,16 +1,16 @@
-# fast-jev-compaction Claude Code mod
+# JetCompact Claude Code mod
 
 This plugin uses Claude Code function hooks to replace a compaction with the
 original messages, minus the tool calls and tool results Jev judged no longer
-needed. `hooks/fast-jev.ts` is a thin adapter: it reads the plugin options,
-finds the TypeSafe key, hands `session.compact` transcripts to the
-`fast-jev-compaction` library in `src/` (the plugin folder is the repository
-root, so the hook imports it directly) and maps the result back onto session
-messages. User and assistant prose is never touched; only host-generated blocks
-(system reminders, task notifications, command echoes, hook output) outside the
-pinned messages are cut to a head and a marker (`trimHostText`). Jev is sent the
-whole conversation as `state` (tool outputs replaced by a one-line note) and,
-for every tool call outside the pinned first and newest messages, two questions:
+needed. `hooks/jetcompact.ts` is a thin adapter: it reads the plugin options,
+finds the TypeSafe key, hands `session.compact` transcripts to the `jetcompact`
+library in `src/` (the plugin folder is the repository root, so the hook imports
+it directly) and maps the result back onto session messages. User and assistant
+prose in the recent turns is never touched; only host-generated blocks (system
+reminders, task notifications, command echoes, hook output) outside the pinned
+messages are cut to a head and a marker (`trimHostText`). Jev is sent the whole
+conversation as `state` (tool outputs replaced by a one-line note) and, for
+every tool call outside the pinned first and newest messages, two questions:
 whether the call should stay and whether its full output should stay. In the
 default `rank` mode the best-scored results are kept verbatim within
 `keepResultTokens`, then the best-scored calls keep their input and a truncated
@@ -37,8 +37,8 @@ surface before installing or loading it:
 export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 export TYPESAFE_API_KEY="<your TypeSafe key>"
 
-claude plugin marketplace add CrazyCoder/fast-jev-compaction
-claude plugin install fast-jev-compaction@crazycoder
+claude plugin marketplace add CrazyCoder/jetcompact
+claude plugin install jetcompact@crazycoder
 ```
 
 For local development:
@@ -122,11 +122,11 @@ log (`$.ui.log` with `to: 'debug'`, nothing in the transcript) gets the
 reduction, per-reason counts, state size and request count, and a per-call
 `decisions:` line with both probabilities for diagnosis. The debug log exists
 only under `claude --debug`, so each outcome is also appended as one timestamped
-line, labelled with the trigger, to
-`~/.claude/fast-jev-compaction/compactions.log` (under `CLAUDE_CONFIG_DIR` when
-set; the newest 200 lines are kept), together with each `/compact` the hook
-queues in a headless session. Text typed after `/compact` goes into Jev's goal
-as what the user asked the compaction to keep (the first 2000 characters).
+line, labelled with the trigger, to `~/.claude/jetcompact/compactions.log`
+(under `CLAUDE_CONFIG_DIR` when set; the newest 200 lines are kept), together
+with each `/compact` the hook queues in a headless session. Text typed after
+`/compact` goes into Jev's goal as what the user asked the compaction to keep
+(the first 2000 characters).
 
 Kept messages go back without their engine handle, so `--resume` starts at the
 compaction (#89). A message without its handle loses the hidden entries Claude
@@ -191,8 +191,9 @@ without a Claude CLI.
 
 With `recall` on (the default), the plugin registers `recall` with
 `$.tool.register` at `session.start`; the model calls it as
-`mcp__fast-jev-compaction__recall` (a deferred tool, loaded through ToolSearch).
-A compaction never deletes from the session transcript,
+`mcp__jetcompact__recall`, kept in the prompt's tool list rather than behind
+ToolSearch (see [What the model is told](#what-the-model-is-told)). A compaction
+never deletes from the session transcript,
 `<config dir>/projects/<project>/<session>.jsonl`: it appends a boundary and
 writes the kept messages again. The `tool.call` hook runs `src/recall/cli.ts`
 with the pinned Node of `tools/node.cmd` (see
@@ -230,15 +231,15 @@ copies after each boundary, and keeps each call's first, uncut result:
   the session id; open one with `session`. With qmd installed and
   `sessionIndex: "auto"` (the default), the search goes through a qmd index
   instead: each transcript is exported as markdown to
-  `<config dir>/fast-jev-compaction/sessions/<project>/<session>.md` (prompts,
-  replies, calls with the head of their results) and indexed in a qmd index of
-  its own, `fast-jev-sessions` (`~/.cache/qmd/fast-jev-sessions.sqlite`,
-  `~/.config/qmd/fast-jev-sessions.yml`), apart from the default one. The first
-  search builds it in the background and is answered by the scan; later searches
-  re-export the sessions that changed (not the current one), update the index
-  and search it. When the index finds nothing in the asked projects, or a search
-  fails or throws, the scan answers; a failed search rebuilds the index next
-  time only when its index file is gone. The exports, their folders and the
+  `<config dir>/jetcompact/sessions/<project>/<session>.md` (prompts, replies,
+  calls with the head of their results) and indexed in a qmd index of its own,
+  `jetcompact-sessions` (`~/.cache/qmd/jetcompact-sessions.sqlite`,
+  `~/.config/qmd/jetcompact-sessions.yml`), apart from the default one. The
+  first search builds it in the background and is answered by the scan; later
+  searches re-export the sessions that changed (not the current one), update the
+  index and search it. When the index finds nothing in the asked projects, or a
+  search fails or throws, the scan answers; a failed search rebuilds the index
+  next time only when its index file is gone. The exports, their folders and the
   index file are made readable by their owner only on each build, and an export
   goes when Claude Code removes its transcript after `cleanupPeriodDays`. On
   Windows the npm `qmd.cmd` shim is run as its script under the shim's own Node.
@@ -278,13 +279,13 @@ to, and never on every prompt:
 - **A digest or summary header** ends with
   `the recall tool reads them back from the transcript (query, expand)`.
 - **One compaction note** opens the compacted history: a user message starting
-  `[fast-jev-compaction note]` that says what this compaction cut (results cut
-  to heads, calls stubbed or dropped, messages digested) and to use recall
-  before running a tool again or saying something earlier is gone, with an
-  assistant acknowledgement. Each compaction replaces it, so there is only ever
-  one; a compaction that cut nothing writes none. It is part of the
-  conversation, so it survives a restart and `--resume`, until Claude Code's
-  built-in summary replaces the history.
+  `[jetcompact note]` that says what this compaction cut (results cut to heads,
+  calls stubbed or dropped, messages digested) and to use recall before running
+  a tool again or saying something earlier is gone, with an assistant
+  acknowledgement. Each compaction replaces it, so there is only ever one; a
+  compaction that cut nothing writes none. It is part of the conversation, so it
+  survives a restart and `--resume`, until Claude Code's built-in summary
+  replaces the history.
 
 ### `/recall-index`
 

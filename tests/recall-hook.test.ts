@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { register } from '../hooks/fast-jev.ts';
+import { register } from '../hooks/jetcompact.ts';
 import { RECALL_TOOL, recallRequest } from '../src/recall/tool.ts';
 import { callRow, resultRow, userRow } from './helpers/rows.js';
 
@@ -46,7 +46,7 @@ const realCli = async (argv: readonly string[], init?: Run['init']) => {
 
 function host(home: string, run: (argv: readonly string[], init?: Run['init']) => Promise<unknown> = realCli) {
   const runs: Run[] = [];
-  const toolRegister = vi.fn(async (spec: { name: string }) => ({ tool: `mcp__fast-jev-compaction__${spec.name}` }));
+  const toolRegister = vi.fn(async (spec: { name: string }) => ({ tool: `mcp__jetcompact__${spec.name}` }));
   const commandRegister = vi.fn(async (spec: { name: string }) => ({ command: spec.name }));
   const $ = {
     env: { get: async (name: string) => ({ HOME: home, TYPESAFE_API_KEY: 'k' })[name] },

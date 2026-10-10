@@ -3,17 +3,19 @@
 All notable changes to this fork are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.9.0]
+## [0.10.0]
 
-First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
+First release of JetCompact, a fork of fast-jev-compaction based on
+QuanticPotatoes 0.8.0. The plugin id is `jetcompact`; its markers, data folder
+(`~/.claude/jetcompact/`) and qmd index (`jetcompact-sessions`) carry the name.
 
 ### Added
 
 - `recall` (default on): the model gets a `recall` tool
-  (`mcp__fast-jev-compaction__recall`) over the session transcript, with `query`
-  (BM25 or regex), `expand` (by `#N` or tool_use_id, the uncut result, saved
-  large outputs included), `range` and `touched` (files changed, or every call
-  on a file), in answers of at most 48k characters; `agent` runs a request on
+  (`mcp__jetcompact__recall`) over the session transcript, with `query` (BM25 or
+  regex), `expand` (by `#N` or tool_use_id, the uncut result, saved large
+  outputs included), `range` and `touched` (files changed, or every call on a
+  file), in answers of at most 48k characters; `agent` runs a request on
   subagent transcripts, `sessions` searches past sessions of this project,
   another or all (`project`), and `session` runs a request on one of them; with
   qmd installed that search uses a qmd index of the sessions
@@ -27,16 +29,16 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
 - Recall guidance: the recall tool is kept in the prompt's tool list instead of
   behind ToolSearch; a digest or summary header says recall reads its turns
   back; and a compaction that cut anything opens the history with one
-  `[fast-jev-compaction note]` saying what it cut and to use recall before
-  re-running a tool, replaced by the next compaction (`recallNotes` in the
-  library; `withoutCompactionNote` strips it).
+  `[jetcompact note]` saying what it cut and to use recall before re-running a
+  tool, replaced by the next compaction (`recallNotes` in the library;
+  `withoutCompactionNote` strips it).
 - `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
   SHA-256 on first use, which runs the recall tool; CI checks the line endings
   of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.
 - Each compaction outcome, and each `/compact` queued in a headless session, is
   appended as one line to
-  `<CLAUDE_CONFIG_DIR or ~/.claude>/fast-jev-compaction/compactions.log` (newest
-  200 lines).
+  `<CLAUDE_CONFIG_DIR or ~/.claude>/jetcompact/compactions.log` (newest 200
+  lines).
 - Hidden content (skill bodies, prompts typed while a tool ran, attachments,
   images and ToolSearch-loaded tools) is read from the conversation's API form
   and folded back as text into the handle-stripped rows; images and deferred

@@ -1,3 +1,4 @@
+import { PLUGIN_ID } from './brand.js';
 import { sliceSurrogateSafe } from './state.js';
 import type { Message, ResolvedCompactOptions } from './types.js';
 
@@ -34,7 +35,7 @@ export const HOST_TEXT_PATTERNS: readonly HostTextPattern[] = [
   },
 ];
 
-export const HOST_TEXT_MARKER_PREFIX = '[fast-jev-compaction trimmed ';
+export const HOST_TEXT_MARKER_PREFIX = `[${PLUGIN_ID} trimmed `;
 
 const markerOf = (chars: number): string => `${HOST_TEXT_MARKER_PREFIX}${chars} chars of host notice]`;
 

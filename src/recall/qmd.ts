@@ -2,9 +2,9 @@
  * A qmd index of past sessions, for the cross-session search when qmd is
  * installed. Each transcript of the projects the index covers (all, unless
  * `/recall-index` chose some) is exported as markdown to
- * `<config>/fast-jev-compaction/sessions/<project>/<session>.md` (prompts,
- * replies, and each call with the head of its result), and indexed in a qmd
- * index of its own, `fast-jev-sessions`, apart from the user's default one.
+ * `<config>/jetcompact/sessions/<project>/<session>.md` (prompts, replies,
+ * and each call with the head of its result), and indexed in a qmd index of
+ * its own, `jetcompact-sessions`, apart from the user's default one.
  *
  * The first search starts building the index in the background and is
  * answered by the transcript scan; later searches export the sessions that
@@ -16,11 +16,12 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, st
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PLUGIN_ID } from '../brand.ts';
 import { projects, readSession, transcripts } from './files.ts';
 import { dateOf, sessionLabel, sessionTitle, type IndexedHit, type SessionIndex } from './sessions.ts';
 import type { Entry } from './transcript.ts';
 
-export const QMD_INDEX = 'fast-jev-sessions';
+export const QMD_INDEX = `${PLUGIN_ID}-sessions`;
 const COLLECTION = 'sessions';
 const TEXT_CHARS = 4_000;
 const INPUT_CHARS = 500;
@@ -30,7 +31,7 @@ const QMD_TIMEOUT_MS = 120_000;
 /** A build marked as running longer ago than this is taken as dead. */
 const BUILD_STALE_MS = 3_600_000;
 
-export const sessionsDir = (configDir: string) => join(configDir, 'fast-jev-compaction', 'sessions');
+export const sessionsDir = (configDir: string) => join(configDir, PLUGIN_ID, 'sessions');
 
 /**
  * How to run the installed qmd, or undefined when none is on the PATH. On

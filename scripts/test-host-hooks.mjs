@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 // The native runner discovers *.test.ts recursively. Give it an isolated
 // copy so it never attempts to load the Vitest tests.
 const root = fileURLToPath(new URL('..', import.meta.url));
-const fixture = await mkdtemp(join(tmpdir(), 'fast-jev-host-tests-'));
+const fixture = await mkdtemp(join(tmpdir(), 'jetcompact-host-tests-'));
 try {
   for (const name of ['.claude-plugin', 'hooks', 'src']) {
     await cp(join(root, name), join(fixture, name), { recursive: true });

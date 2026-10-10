@@ -6,12 +6,12 @@ The repository is also an npm package (`src/`). The Claude Code plugin in
 ## Install and usage
 
 ```sh
-npm install fast-jev-compaction
+npm install jetcompact
 export TYPESAFE_API_KEY=...
 ```
 
 ```ts
-import { compactMessages, reductionRatio, type Message } from 'fast-jev-compaction';
+import { compactMessages, reductionRatio, type Message } from 'jetcompact';
 
 const transcript: Message[] = [
   { role: 'user', text: 'Fix the failing test. Never edit src/generated.', toolUses: [] },
@@ -80,7 +80,7 @@ engine handle lose; see [hooks/README.md](../hooks/README.md).
 | `instructions` | none | What the user asked this compaction to keep; added to the goal, capped at 2000 characters |
 | `truncateHeadChars` | `300` | Characters of a dropped tool result retained before its note |
 | `dropCalls` | `false` | `true` removes a no-longer-needed call with its result; `false` leaves a stub of the call |
-| `recallNotes` | `false` | For hosts that offer the recall tool. Cut notes end with `full text: recall expand ["<tool_use_id>"]` instead of "re-run the tool if needed"; a digest or summary header says recall reads the dropped turns back; and a compaction that cut anything opens the history with a note (a user message starting `[fast-jev-compaction note]` and an assistant acknowledgement) saying what was cut and to use recall before re-running a tool. The next compaction replaces the note; `withoutCompactionNote(messages)` strips it |
+| `recallNotes` | `false` | For hosts that offer the recall tool. Cut notes end with `full text: recall expand ["<tool_use_id>"]` instead of "re-run the tool if needed"; a digest or summary header says recall reads the dropped turns back; and a compaction that cut anything opens the history with a note (a user message starting `[jetcompact note]` and an assistant acknowledgement) saying what was cut and to use recall before re-running a tool. The next compaction replaces the note; `withoutCompactionNote(messages)` strips it |
 | `trimHostText` | `true` | Cut host-generated blocks (`<system-reminder>`, `<task-notification>`, command echoes, hook output; never user prose) outside the pinned messages to a head plus a marker |
 | `hostTextHeadChars` | `200` | Characters of a trimmed host block retained before its marker |
 | `oldProse` | `keep` | `digest` replaces everything before the last `recentTurns` user turns with a deterministic digest (first prompt, per-turn prompt head and final reply head, tool names, referenced paths and ids); `summarize` with a model-written summary (plugin: `proseModel`, falls back to the digest; the library needs a `summarize` callback in `compact`'s fourth argument). An earlier digest or summary is folded, not chained |

@@ -147,8 +147,8 @@ describe('recall in subagent transcripts', () => {
 
 describe('recallCommand', () => {
   it('runs tools/node.cmd with bash on Linux and macOS', () => {
-    expect(recallCommand('/home/me/.claude/plugins/cache/x/fast-jev-compaction/0.9.0')).toEqual({
-      argv: ['bash', '/home/me/.claude/plugins/cache/x/fast-jev-compaction/0.9.0/tools/node.cmd', '/home/me/.claude/plugins/cache/x/fast-jev-compaction/0.9.0/src/recall/cli.ts'],
+    expect(recallCommand('/home/me/.claude/plugins/cache/x/jetcompact/0.10.0')).toEqual({
+      argv: ['bash', '/home/me/.claude/plugins/cache/x/jetcompact/0.10.0/tools/node.cmd', '/home/me/.claude/plugins/cache/x/jetcompact/0.10.0/src/recall/cli.ts'],
     });
   });
 

@@ -11,8 +11,13 @@ import type { Entry } from './transcript.ts';
 /** The most one recall answer holds, in characters. */
 export const RECALL_MAX_CHARS = 48_000;
 
-/** The recall tool as the model calls it; its calls are not listed. */
-export const RECALL_TOOL = 'mcp__fast-jev-compaction__recall';
+/**
+ * The recall tool as the model calls it, `mcp__<PLUGIN_ID>__recall`; its calls
+ * are not listed. Spelled out: this file runs both in the built library and
+ * under plain Node, and no import path of src/brand.ts resolves in both. A test
+ * holds it to PLUGIN_ID.
+ */
+export const RECALL_TOOL = 'mcp__jetcompact__recall';
 
 export type RecallRequest = {
   /** Keywords, ranked by BM25; or a regex when it holds regex characters. */

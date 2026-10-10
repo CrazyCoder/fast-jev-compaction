@@ -131,7 +131,7 @@ export interface CompactOptions {
    * tool name stays, input and result are cut to `truncateHeadChars`, so the
    * history keeps a tool call in front of every report the assistant made.
    * Default false: a silent drop led the model to report work it never did
-   * (fast-jev-compaction#65).
+   * (tamaratran/fast-jev-compaction#65).
    */
   dropCalls?: boolean;
   /**

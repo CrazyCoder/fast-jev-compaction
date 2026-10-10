@@ -244,9 +244,9 @@ describe('hidden content', () => {
       { anchor: { toolUseId: 'r1' }, text: queued('also check b.ts') },
       {
         anchor: { toolUseId: 'q1' },
-        text: '[fast-jev-compaction: deferred tools mcp__x__search, mcp__x__fetch were loaded here; load them again with ToolSearch before use]',
+        text: '[jetcompact: deferred tools mcp__x__search, mcp__x__fetch were loaded here; load them again with ToolSearch before use]',
       },
-      { anchor: { toolUseId: 'i1' }, text: '[fast-jev-compaction: 1 image omitted from this tool result]' },
+      { anchor: { toolUseId: 'i1' }, text: '[jetcompact: 1 image omitted from this tool result]' },
       { anchor: { row: rows[10] }, text: '<system-reminder>\nContents of b.ts: attached\n</system-reminder>' },
     ]);
   });
@@ -266,7 +266,7 @@ describe('hidden content', () => {
     const textOf = (id: string) => messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === id)!.text;
     expect(textOf('s1')).toBe('Launching skill: probe\n\nBase directory for this skill: /x\n\nThe skill body.');
     expect(textOf('r1')).toBe(`file a [truncated]\n\n${queued('also check b.ts')}`);
-    expect(textOf('i1')).toMatch(/^image file\n\n\[fast-jev-compaction: 1 image omitted/);
+    expect(textOf('i1')).toMatch(/^image file\n\n\[jetcompact: 1 image omitted/);
     expect(messages.at(-1)!.text).toBe('next prompt\n\n<system-reminder>\nContents of b.ts: attached\n</system-reminder>');
     // The input rows are left alone.
     expect(rows[2]!.toolResults![0]!.text).toBe('Launching skill: probe');
@@ -279,7 +279,7 @@ describe('hidden content', () => {
     const out = foldHiddenContent(rows, [long, ...hidden.slice(1)], { cutIds: new Set(['s1']), headChars: 50 });
     const s1 = out.messages.flatMap((m) => m.toolResults ?? []).find((r) => r.tool_use_id === 's1')!;
     expect(s1.text).toBe(
-      `Launching skill: probe\n\n${'x'.repeat(50)}\n[fast-jev-compaction cut 950 chars of content attached here]`,
+      `Launching skill: probe\n\n${'x'.repeat(50)}\n[jetcompact cut 950 chars of content attached here]`,
     );
     const before = rows.reduce((sum, m) => sum + m.text.length + (m.toolResults ?? []).reduce((s, r) => s + r.text.length, 0), 0);
     const after = out.messages.reduce((sum, m) => sum + m.text.length + (m.toolResults ?? []).reduce((s, r) => s + r.text.length, 0), 0);

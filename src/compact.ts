@@ -1,3 +1,4 @@
+import { marker, PLUGIN_ID } from './brand.js';
 import { trimHostText } from './host-text.js';
 import { condenseOldProse, DEFAULT_RECENT_TURNS, type ProseSummarizer } from './prose.js';
 import { RECALL_TOOL } from './recall/recall.js';
@@ -51,7 +52,7 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
 const REQUEST_OVERHEAD_TOKENS = 20;
 
 /** The note a compaction with recall notes opens the history with; the next compaction replaces it. */
-const NOTE_MARKER = '[fast-jev-compaction note]';
+const NOTE_MARKER = `[${PLUGIN_ID} note]`;
 const NOTE_ACK = 'Understood: earlier content is cut, not lost; I will use recall to read it back.';
 
 type Turn = { role?: string; text: string; toolUses?: readonly unknown[] };
@@ -386,7 +387,7 @@ function truncatedResultText(text: string, isError: boolean, headChars: number, 
   // would leave a lone surrogate in the rebuilt transcript.
   const cut = splitsSurrogatePair(text, headChars) ? headChars - 1 : headChars;
   const head = cut > 0 ? `${text.slice(0, cut)}\n` : '';
-  return `${head}[fast-jev-compaction truncated ${text.length - cut} chars of this tool result${
+  return `${head}[${PLUGIN_ID} truncated ${text.length - cut} chars of this tool result${
     isError ? ' (error)' : ''
   }${restOf(id, recall, '; re-run the tool if needed')}]`;
 }
@@ -396,7 +397,7 @@ function truncatedInput(input: Record<string, unknown>, headChars: number, id: s
   if (json.length <= headChars + 120) return input;
   return {
     input_head: json.slice(0, headChars),
-    note: `[fast-jev-compaction truncated ${json.length - headChars} chars of this tool input${restOf(id, recall, '')}]`,
+    note: marker(`truncated ${json.length - headChars} chars of this tool input${restOf(id, recall, '')}`),
   };
 }
 

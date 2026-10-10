@@ -6,10 +6,10 @@
   },
   "plugins": [
     {
-      "name": "fast-jev-compaction",
+      "name": "jetcompact",
       "source": "./",
-      "description": "Verbatim Jev-guided compaction for Claude Code sessions.",
-      "version": "0.9.0",
+      "description": "JetCompact: verbatim Jev-guided compaction for Claude Code, with a recall tool that reads back what compaction cut and searches past sessions.",
+      "version": "0.10.0",
       "license": "MIT"
     }
   ],

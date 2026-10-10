@@ -13,7 +13,7 @@ const result = (id: string, content: string | Block[], extra: Block = {}) =>
 const boundary = () => JSON.stringify({ type: 'system', subtype: 'compact_boundary' });
 
 const FULL = 'line\n'.repeat(50);
-const CUT = 'line\n[fast-jev-compaction truncated 245 chars of this tool result; full text: recall expand ["t1"]]';
+const CUT = 'line\n[jetcompact truncated 245 chars of this tool result; full text: recall expand ["t1"]]';
 
 describe('readTranscript', () => {
   it('reads prompts, replies and calls with their results in order', () => {

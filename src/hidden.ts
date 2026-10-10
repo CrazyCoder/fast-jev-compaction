@@ -1,3 +1,4 @@
+import { marker, placeholder } from './brand.js';
 import { sliceSurrogateSafe } from './state.js';
 import type { Message } from './types.js';
 
@@ -114,11 +115,11 @@ function resultExtras(block: ApiBlock, own: string): string[] {
       .map((part) => String((part as ApiBlock)['tool_name'] ?? '?'));
     if (tools.length > 0) {
       out.push(
-        `[fast-jev-compaction: deferred tools ${tools.join(', ')} were loaded here; load them again with ToolSearch before use]`,
+        placeholder(`deferred tools ${tools.join(', ')} were loaded here; load them again with ToolSearch before use`),
       );
     }
     if (images > 0) {
-      out.push(`[fast-jev-compaction: ${images} image${images === 1 ? '' : 's'} omitted from this tool result]`);
+      out.push(placeholder(`${images} image${images === 1 ? '' : 's'} omitted from this tool result`));
     }
   }
   return out;
@@ -189,7 +190,7 @@ export function hiddenContent(rows: readonly Message[], view: readonly ApiMessag
       // Ahead of the first prompt: the session context the host sends again.
       if (first && !anchor) continue;
       if (block.type === 'image') {
-        add(anchor, '[fast-jev-compaction: 1 image omitted here]');
+        add(anchor, placeholder('1 image omitted here'));
         continue;
       }
       if (block.type !== 'text') continue;
@@ -275,7 +276,7 @@ export function foldHiddenContent<M extends Message>(
     const head = options.headChars ?? 0;
     if (!('toolUseId' in anchor) || !options.cutIds?.has(anchor.toolUseId) || text.length <= head + 120) return text;
     const kept = sliceSurrogateSafe(text, 0, head);
-    return `${kept}\n[fast-jev-compaction cut ${text.length - kept.length} chars of content attached here]`;
+    return `${kept}\n${marker(`cut ${text.length - kept.length} chars of content attached here`)}`;
   };
   const where = new Map<string, number>();
   out.forEach((message, index) => {
