@@ -9,10 +9,12 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { resolveRefs, runRecall, type RecallDeps, type RecallRequest } from './recall.ts';
+import { findSession, searchSessions } from './sessions.ts';
 import { isSavedOutput } from './tool.ts';
 import { transcriptReader, type Entry } from './transcript.ts';
 
-export type CliInput = { configDir: string; sessionId: string; request: RecallRequest };
+/** The request on stdin; `rg` names the ripgrep binary (tests point it at a missing one). */
+export type CliInput = { configDir: string; sessionId: string; request: RecallRequest; rg?: string };
 
 /** A subagent of the session: `<session>/subagents/agent-<id>.jsonl` and its `.meta.json`. */
 type Agent = { id: string; name: string; startedBy?: string; file: string };
@@ -54,7 +56,7 @@ async function readEntries(file: string, sidechain = false): Promise<Entry[]> {
 async function agentEntries(agents: readonly Agent[], after: number): Promise<Entry[]> {
   const out: Entry[] = [];
   for (const agent of agents) {
-    for (const entry of await readEntries(agent.file, true)) out.push({ ...entry, n: after + out.length + 1, agent: agent.name });
+    for (const entry of await readEntries(agent.file, true)) out.push({ ...entry, n: after + out.length + 1, where: agent.name });
   }
   return out;
 }
@@ -85,9 +87,21 @@ export function findTranscript(configDir: string, sessionId: string): string | u
   return undefined;
 }
 
-export async function answer({ configDir, sessionId, request }: CliInput): Promise<string> {
+export async function answer({ configDir, sessionId, request, rg }: CliInput): Promise<string> {
   const file = /^[\w-]+$/.test(sessionId) ? findTranscript(configDir, sessionId) : undefined;
   if (!file) return 'Recall: no transcript found for this session.';
+  const { sessions, project, session, ...rest } = request;
+  if (sessions?.trim()) return searchSessions(configDir, file, sessions.trim(), project, rest.page ?? 1, rg);
+  if (session?.trim()) {
+    const other = findSession(configDir, session.trim());
+    if (!other) return `No session matches "${session.trim().slice(0, 60)}".`;
+    return answerFile(configDir, other, rest);
+  }
+  return answerFile(configDir, file, rest);
+}
+
+/** Answers a request from one session's transcript and its subagents'. */
+async function answerFile(configDir: string, file: string, request: RecallRequest): Promise<string> {
   const deps: RecallDeps = {
     readFile: (path) => {
       if (!isSavedOutput(path, configDir)) return undefined;

@@ -14,8 +14,8 @@ export { RECALL_TOOL };
 export const RECALL_NAME = 'recall';
 
 export const RECALL_DESCRIPTION = [
-  'Recall earlier parts of this session, including the tool calls and results that compaction cut or dropped.',
-  'Use it before saying the context is gone, and instead of running a tool again to see its old output.',
+  'Recall earlier parts of this session, including the tool calls and results that compaction cut or dropped, and of past sessions in this project or others.',
+  'Use it before saying the context is gone, instead of running a tool again to see its old output, and when the user points at earlier work ("as we did in the billing-api session").',
   '',
   'One per call:',
   '- query: keywords (ranked) or a regex, e.g. "redis timeout"; 5 hits per page.',
@@ -23,6 +23,8 @@ export const RECALL_DESCRIPTION = [
   '- range: [from, to]: entries #from..#to in order, one line each.',
   '- touched: true for the files changed in this session and the calls that changed them; a part of a path for every call on the files it matches, reads included.',
   'Add page for more query, range or touched results, and offset to continue a long expand.',
+  '- sessions: keywords searched in the other sessions of this project; with project: "<part of its folder or path>" in another project, or project: "all" in every one. Each hit names its session id.',
+  'session: "<id>" runs query, expand, range or touched on that session instead of this one.',
   'Subagents keep their own transcripts: agent: "list" names them; agent: "<id or part of its name>" runs the request on one, agent: "all" on the session and all of them. expand finds a subagent call by its tool_use_id without it.',
   'A compaction note names the tool_use_id to expand. A tool_use_id always names the same call; #N can shift as the session grows.',
 ].join('\n');
@@ -41,6 +43,12 @@ export const RECALL_INPUT_SCHEMA = {
       type: ['boolean', 'string'],
       description: 'true: files changed and by which calls; a part of a path: every call on the files it matches.',
     },
+    sessions: { type: 'string', description: 'Keywords to search in other sessions.' },
+    project: {
+      type: 'string',
+      description: 'For sessions: "all", or a part of a project folder or path; this project when absent.',
+    },
+    session: { type: 'string', description: 'Run the request on this other session: its id, or 8+ leading characters.' },
     agent: {
       type: 'string',
       description: 'Subagent transcripts: "list", "all" (with this session), or a part of an agent id or name.',
@@ -63,6 +71,9 @@ export function recallRequest(e: Record<string, unknown>): RecallRequest {
     ...(number(e['offset']) !== undefined && { offset: number(e['offset']) }),
     ...((e['touched'] === true || typeof e['touched'] === 'string') && { touched: e['touched'] as true | string }),
     ...(typeof e['agent'] === 'string' && { agent: e['agent'] }),
+    ...(typeof e['sessions'] === 'string' && { sessions: e['sessions'] }),
+    ...(typeof e['project'] === 'string' && { project: e['project'] }),
+    ...(typeof e['session'] === 'string' && { session: e['session'] }),
   };
 }
 

@@ -153,5 +153,7 @@ describe('recall requests', () => {
     expect(recallRequest({ touched: 'app.ts' })).toEqual({ touched: 'app.ts' });
     expect(recallRequest({ touched: 1 })).toEqual({});
     expect(recallRequest({ query: 'x', agent: 'all' })).toEqual({ query: 'x', agent: 'all' });
+    expect(recallRequest({ sessions: 'jscpd', project: 'billing-api' })).toEqual({ sessions: 'jscpd', project: 'billing-api' });
+    expect(recallRequest({ session: '0f1e2d3c', expand: ['t1'] })).toEqual({ session: '0f1e2d3c', expand: ['t1'] });
   });
 });

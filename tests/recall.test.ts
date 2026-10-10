@@ -26,7 +26,7 @@ describe('recall labels', () => {
     n = 0;
     const entries = [
       call('t1', 'Agent', { description: 'Research recall' }, 'report', { agentId: 'a3d55' }),
-      { ...call('t9', 'Bash', { command: 'rg BM25' }, 'hits'), agent: 'general-purpose: Research recall' } as Entry,
+      { ...call('t9', 'Bash', { command: 'rg BM25' }, 'hits'), where: 'general-purpose: Research recall' } as Entry,
     ];
     const out = runRecall(entries, { range: [1, 2] });
     expect(out).toContain('#1 call Agent (t1) [started agent a3d55]');

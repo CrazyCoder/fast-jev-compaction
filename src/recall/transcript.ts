@@ -13,12 +13,12 @@
  */
 
 export type Entry =
-  | { n: number; kind: 'prompt' | 'reply'; text: string; agent?: string }
+  | { n: number; kind: 'prompt' | 'reply'; text: string; where?: string }
   | {
       n: number;
       kind: 'call';
-      /** The subagent whose transcript holds it, as `type: description`; absent for the session's own. */
-      agent?: string;
+      /** The transcript that holds it when not the session's own: a subagent, or another session. */
+      where?: string;
       /** For an Agent call: the subagent it started. */
       agentId?: string;
       id: string;
@@ -63,9 +63,14 @@ function textOf(content: unknown): string {
 /**
  * Reads transcript lines one at a time; `entries` grows as they come. A
  * subagent's transcript holds only sidechain rows, so `sidechain` takes them;
- * the session's own transcript skips them.
+ * the session's own transcript skips them. A search fed only the lines that
+ * match can see a result without its call: `orphanResults` keeps those as a
+ * call of tool `result`.
  */
-export function transcriptReader({ sidechain = false } = {}): { line: (raw: string) => void; entries: Entry[] } {
+export function transcriptReader({ sidechain = false, orphanResults = false } = {}): {
+  line: (raw: string) => void;
+  entries: Entry[];
+} {
   const entries: Entry[] = [];
   const calls = new Map<string, Call>();
   /** Each prompt or reply seen, keyed by its text and the entry before it, to an id. */
@@ -87,6 +92,7 @@ export function transcriptReader({ sidechain = false } = {}): { line: (raw: stri
   };
 
   const result = (id: string, raw: string, isError: boolean): void => {
+    if (orphanResults && !calls.has(id)) toolUse(id, 'result', {});
     const call = calls.get(id);
     if (!call || call.result !== undefined) return;
     call.result = withoutReminders(raw);

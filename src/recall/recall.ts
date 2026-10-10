@@ -29,6 +29,12 @@ export type RecallRequest = {
   touched?: boolean | string;
   /** Subagent transcripts: "list", "all" (with the session's own), or a part of an agent's id or name. */
   agent?: string;
+  /** Keywords searched in other sessions, of this project unless `project` says otherwise. */
+  sessions?: string;
+  /** For sessions: "all", or a part of a project's folder name or working directory. */
+  project?: string;
+  /** Run the request on another session: its id, or its first 8 characters or more. */
+  session?: string;
 };
 
 export type RecallDeps = {
@@ -128,6 +134,13 @@ const STOPWORDS = new Set(
 const BM25_K = 1.2;
 const BM25_B = 0.75;
 
+/** The words a query ranks by: regex characters dropped, and stopwords unless nothing else is left. */
+export function keywords(query: string): string[] {
+  const words = query.replace(/[|*+?{}()[\]\\^$]/g, ' ').split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()) && w.length > 1);
+  return meaningful.length > 0 ? meaningful : words;
+}
+
 /** The searchable text of an entry. */
 function docOf(entry: Entry): string {
   return entry.kind === 'call' ? `${entry.tool} ${JSON.stringify(entry.input)}\n${entry.result ?? ''}` : entry.text;
@@ -158,9 +171,7 @@ function search(entries: readonly Entry[], query: string): { hits: Entry[]; mark
     if (hits.length > 0) return { hits: hits.reverse(), marker: re };
     query = query.replace(/[|*+?{}()[\]\\^$]/g, ' ');
   }
-  const words = query.split(/\s+/).filter(Boolean);
-  const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()) && w.length > 1);
-  const terms = (meaningful.length > 0 ? meaningful : words).map((w) => new RegExp(escapeRegex(w), 'gi'));
+  const terms = keywords(query).map((w) => new RegExp(escapeRegex(w), 'gi'));
   const lengths = docs.map((doc) => doc.split(/\s+/).length);
   const avg = lengths.reduce((a, b) => a + b, 0) / Math.max(docs.length, 1);
   const df = terms.map((term) => docs.filter((doc) => doc.search(term) !== -1).length);
@@ -188,7 +199,7 @@ const clip = (text: string, chars: number): string => (text.length <= chars ? te
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
 function heading(entry: Entry): string {
-  const where = entry.agent ? ` [${entry.agent}]` : '';
+  const where = entry.where ? ` [${entry.where}]` : '';
   if (entry.kind !== 'call') return `#${entry.n}${where} ${entry.kind}`;
   const started = entry.agentId ? ` [started agent ${entry.agentId}]` : '';
   return `#${entry.n}${where} call ${entry.tool} (${entry.id})${started}`;
@@ -227,19 +238,28 @@ function pager(total: number, size: number, page: number): { from: number; pages
   return { from: (current - 1) * size, pages, page: current };
 }
 
-function runQuery(entries: readonly Entry[], query: string, page: number): string {
+/** How a query answer over entries from several transcripts names its scope, footer and miss. */
+export type QueryText = {
+  scope?: (hits: readonly Entry[]) => string;
+  footer?: string;
+  none?: (echo: string) => string;
+};
+
+/** Ranked hits for `query`, a page at a time. */
+export function runQuery(entries: readonly Entry[], query: string, page: number, text: QueryText = {}): string {
   const { hits, marker } = search(entries, query);
   const echo = clip(query, QUERY_ECHO_CHARS);
-  if (hits.length === 0) return `No match for "${echo}".`;
+  if (hits.length === 0) return text.none?.(echo) ?? `No match for "${echo}".`;
   const p = pager(hits.length, QUERY_PAGE, page);
   const blocks = hits
     .slice(p.from, p.from + QUERY_PAGE)
     .map((entry) => `${heading(entry)}\n${snippet(docOf(entry), marker)}`);
   const next = p.page < p.pages ? ` Next: page: ${p.page + 1}.` : '';
+  const scope = text.scope ? ` ${text.scope(hits)}` : '';
   return [
-    `${hits.length} match(es) for "${echo}", page ${p.page}/${p.pages}:`,
+    `${hits.length} match(es)${scope} for "${echo}", page ${p.page}/${p.pages}:`,
     ...blocks,
-    `Full text: expand: ["#N"] or a tool_use_id.${next}`,
+    `${text.footer ?? 'Full text: expand: ["#N"] or a tool_use_id.'}${next}`,
   ].join('\n\n');
 }
 

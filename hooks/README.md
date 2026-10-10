@@ -207,6 +207,15 @@ copies after each boundary, and keeps each call's first, uncut result:
   changed, newest change first, with the last five calls on each; a part of a
   path lists every call on the files it matches, reads included. 50 lines per
   page.
+- `sessions`: keywords searched in the other sessions of this project (the
+  folder under `<config dir>/projects/` that holds this session), or with
+  `project: "<part of a folder name or working directory>"` in other projects,
+  `project: "all"` in every one. A session counts when it holds every keyword
+  (any keyword when none holds all); ripgrep picks those transcripts when it is
+  on the PATH, and only their matching lines are read. Each hit is labelled with
+  the project, the date, the session title (or first prompt) and the session id.
+- `session: "<id or its first 8+ characters>"` runs `query`, `expand`, `range`,
+  `touched` or `agent` on that session instead of this one.
 - `agent`: subagents keep their own transcripts under `<session>/subagents/`.
   `"list"` names them with the Agent call that started each; a part of an
   agent's id or name runs the request on that agent's transcript, `"all"` on the
