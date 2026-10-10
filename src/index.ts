@@ -6,3 +6,4 @@ export * from './compact.js';
 export * from './messages.js';
 export * from './host-text.js';
 export * from './prose.js';
+export * from './hidden.js';

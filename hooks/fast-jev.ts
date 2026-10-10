@@ -12,6 +12,7 @@ import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
 import { buildJevRequest, DEFAULT_MODEL, JevTransportError, parseJevResponse } from '../src/request.js';
+import { foldHiddenContent, hiddenContent, type ApiMessage } from '../src/hidden.js';
 import type { ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
@@ -282,8 +283,9 @@ export async function compactSession(
  * after the compact boundary. With handles, kept tool_result records keep a
  * parentUuid behind the boundary and kept assistant records keep their
  * message.id, so `--resume` walks back into the full pre-compaction history
- * (fast-jev-compaction#89, anthropics/claude-code#95328). Costs the engine's own
- * bookkeeping for those records (hidden reasoning, images), not their text or tool pairs.
+ * (fast-jev-compaction#89, anthropics/claude-code#95328). Costs each record its
+ * group of hidden entries (skill bodies, prompts typed while a tool ran,
+ * attachments, images); the hook folds those back as text first (src/hidden.ts).
  *
  * The engine hands over one message per record, and a response with parallel
  * calls is several assistant records sharing a message.id. Fresh records get
@@ -614,13 +616,25 @@ export const register: Register = (on: On, options: PluginOptions) => {
           `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target: ${summarize(result)}`,
         );
       }
+      // Rows go back without handles, which costs them their hidden content:
+      // read it from the API form and fold it back in as text.
+      let returned = messages;
+      let hiddenNote = '';
+      try {
+        const view = await $.session.messages({ as: 'api' });
+        const fold = foldHiddenContent(messages, hiddenContent(event.messages, view as ApiMessage[]));
+        returned = fold.messages;
+        hiddenNote = `; hidden content: ${fold.folded} folded back${fold.lost > 0 ? `, ${fold.lost} lost` : ''}`;
+      } catch (error) {
+        hiddenNote = `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
+      }
       await notify(
         $,
         event.trigger,
-        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})`,
+        `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(result)})${hiddenNote}`,
         `compacted, ${percent(reductionRatio(result))} smaller (${messages.length}/${event.messages.length} messages)`,
       );
-      return { messages: withoutHandles(messages) };
+      return { messages: withoutHandles(returned) };
     } catch (error) {
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
         return { skip: `fast-jev-compaction: ${error.message}; conversation left unchanged` };

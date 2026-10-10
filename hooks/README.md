@@ -112,7 +112,22 @@ labelled with the trigger, to `~/.claude/fast-jev-compaction/compactions.log`
 (under `CLAUDE_CONFIG_DIR` when set; the newest 200 lines are kept), together
 with each `/compact` the hook queues in a headless session. Text typed after
 `/compact` goes into Jev's goal as what the user asked the compaction to keep
-(the first 2000 characters). The `turn.complete` hook requests
+(the first 2000 characters).
+
+Kept messages go back without their engine handle, so `--resume` starts at
+the compaction (#89). A message without its handle loses the hidden entries
+Claude Code keeps beside it: a skill's body, a prompt typed while a tool ran,
+file attachments, images and deferred tools inside results. The hook reads
+them from the conversation's API form (`$.session.messages({ as: 'api' })`)
+and folds them back as text after the tool result or prompt they followed;
+images and ToolSearch-loaded tools become one-line placeholders. Token
+countdowns and the session context ahead of the first prompt (environment,
+CLAUDE.md, skill and tool lists) are left out: Claude Code sends those again
+after a compaction. The outcome line counts what was folded back. Checked live
+on Claude Code 2.1.296: without the fold a skill body was gone after
+compaction; with it the model still had it.
+
+The `turn.complete` hook requests
 compaction when `context.percent` reaches `compactAtPercent`, with an
 in-flight guard. When that request is skipped, the hook waits until the
 context has grown by another 10 percentage points, or dropped below
