@@ -115,6 +115,13 @@ describe('runIndexCommand', () => {
     expect(await run(dir, '')).toMatch(/No session index yet/);
   });
 
+  it('removes the whole index with remove all', async () => {
+    const dir = config();
+    await run(dir, 'all');
+    expect(await run(dir, 'remove all')).toMatch(/Removed the session index/);
+    expect(existsSync(sessionsDir(dir))).toBe(false);
+  });
+
   it('drops a removed project\'s exports even when it cannot rebuild the index', async () => {
     const dir = config();
     await run(dir, 'all');

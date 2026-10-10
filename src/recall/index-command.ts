@@ -25,7 +25,7 @@ import {
 } from './qmd.ts';
 
 const USAGE =
-  'Usage: /recall-index [status] | all | <project name or path>… | remove [<project name or path>…]. ' +
+  'Usage: /recall-index [status] | all | <project name or path>… | remove [all | <project name or path>…]. ' +
   'Names and paths can be separated by spaces or commas; quote a path with spaces; "." is this project.';
 const INSTALL = 'qmd is not installed, so recall searches past sessions by scanning their transcripts. To index them, install it with `npm install -g @tobilu/qmd`, then run /recall-index again.';
 
@@ -144,12 +144,12 @@ export async function runIndexCommand({ configDir, sessionId, args, command, nam
     ].join('\n') + qmdNote;
   }
 
-  if (action === 'remove' && targets.length === 0) {
+  const every = targets.some((t) => t.toLowerCase() === 'all');
+  if (action === 'remove' && (targets.length === 0 || every)) {
     removeIndex(configDir, name, env);
     return `Removed the session index: the exported sessions, the "${name}" qmd index and its collection. A cross-session search builds it again for all projects, unless you run /recall-index first.`;
   }
 
-  const every = targets.some((t) => t.toLowerCase() === 'all');
   const { matched, unmatched } = every ? { matched: [...all], unmatched: [] as string[] } : matchProjects(all, targets, currentSlug);
   const missed = unmatched.length > 0 ? `No project matches ${unmatched.map((t) => `"${t}"`).join(', ')}.` : '';
   if (matched.length === 0) return `${missed}\n${USAGE}`.trim();

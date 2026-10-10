@@ -190,8 +190,8 @@ The `recall` tool also searches your other sessions, so you can ask "see how we
 set up jscpd in the billing-api session and do the same here". The model calls
 it with `sessions: "<keywords>"`, in this project by default, in another with
 `project: "<part of its name or path>"`, or in all with `project: "all"`. The
-current session is not among the hits, since recall searches it directly; a last
-line says how many matches it holds.
+current session is not among the hits, since recall searches it directly; when
+the searched projects include it, a last line says how many matches it holds.
 
 There are two ways to search, and recall picks one for you:
 
@@ -221,15 +221,17 @@ projects only, use `/recall-index`:
 | Index a project by name or path | `/recall-index billing-api` or `/recall-index C:\work\billing-api` |
 | Index every project under a folder | `/recall-index C:\work` |
 | Take a project out | `/recall-index remove billing-api` |
-| Delete the index and exports | `/recall-index remove` |
+| Delete the index and exports | `/recall-index remove` or `/recall-index remove all` |
 
 Names match any part of a project's folder name; paths take any slash style or
 case, `~/…`, or a path relative to this project. Several targets can be given,
 separated by spaces or commas; quote a path with spaces. The command waits for
 the build and reports the sessions, projects, time and index size. Once you
 choose projects, only those are indexed and kept up to date; a search elsewhere
-uses the scan. `sessionIndex: "off"` turns the index off. The details are in
-[hooks/README.md](hooks/README.md#recall-index).
+uses the scan. An index that covers all projects, including the one a search
+built on its own, keeps covering all of them when you name one: to index only
+some, run `/recall-index remove` first. `sessionIndex: "off"` turns the index
+off. The details are in [hooks/README.md](hooks/README.md#recall-index).
 
 ## How it works
 

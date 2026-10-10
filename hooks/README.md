@@ -276,7 +276,7 @@ first cross-session search to build it in the background:
 | `/recall-index all` | Indexes every project's sessions now |
 | `/recall-index <project>…` | Indexes these projects now, added to the ones it covers |
 | `/recall-index remove <project>…` | Takes these projects out of the index |
-| `/recall-index remove` | Deletes the exports, the index and its qmd collection |
+| `/recall-index remove` or `remove all` | Deletes the exports, the index and its qmd collection |
 
 A project is named by any part of its folder name (`billing`), by its path in
 any slash style or case (`C:\work\app`, `c:/WORK/app/`), by `~/…`, by a path
