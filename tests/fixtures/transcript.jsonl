@@ -10,6 +10,6 @@ this line is not json
 {"type": "user", "message": {"role": "user", "content": "Summary of the earlier session"}, "isCompactSummary": true}
 {"type": "assistant", "message": {"id": "m4", "role": "assistant", "content": [{"type": "tool_use", "id": "tu4", "name": "Grep", "input": {"pattern": "TODO"}}]}}
 {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu4", "content": "src/a.ts:1: TODO", "is_error": true}]}}
-{"type": "system", "subtype": "informational", "content": "jetcompact: decisions (1/2): t1:Grep:drop_call/call=0.21/result=0.11 t2:Read:keep/call=0.90/result=0.80"}
-{"type": "system", "subtype": "informational", "content": "jetcompact: decisions (2/2): t3:mcp__x__y:stub_call/call=0.30/result=0.05"}
-{"type": "system", "subtype": "informational", "content": "jetcompact: decisions: t1:Bash:drop_result/call=0.60/result=0.10"}
+{"type": "system", "subtype": "informational", "content": "fast-jev-compaction: decisions (1/2): t1:Grep:drop_call/call=0.21/result=0.11 t2:Read:keep/call=0.90/result=0.80"}
+{"type": "system", "subtype": "informational", "content": "fast-jev-compaction: decisions (2/2): t3:mcp__x__y:stub_call/call=0.30/result=0.05"}
+{"type": "system", "subtype": "informational", "content": "fast-jev-compaction: decisions: t1:Bash:drop_result/call=0.60/result=0.10"}

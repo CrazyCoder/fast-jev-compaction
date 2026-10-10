@@ -32,7 +32,10 @@ export interface ParsedTranscript {
 }
 
 const ENTRY = /^(t\d+):(.+?):(\w+)\/call=([\d.]+)\/result=([\d.]+)$/;
-const DECISIONS = /^jetcompact: decisions(?: \((\d+)\/(\d+)\))?: (.*)$/s;
+// Decision lines reach a transcript only from upstream fast-jev-compaction,
+// which logged them there under its own name; JetCompact logs them to the
+// debug log alone.
+const DECISIONS = /^fast-jev-compaction: decisions(?: \((\d+)\/(\d+)\))?: (.*)$/s;
 
 function isRecord(value: unknown): value is Block {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
