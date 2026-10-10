@@ -629,8 +629,8 @@ export function isHeadlessRefusal(error: unknown): boolean {
 
 /** How long one recall answer may take; the first one may download Node. */
 const RECALL_TIMEOUT_MS = 120_000;
-/** A /recall-index build of every project reads every transcript. */
-const RECALL_INDEX_TIMEOUT_MS = 900_000;
+/** A /recall-index build of every project reads every transcript: the most `$.process.run` allows. */
+const RECALL_INDEX_TIMEOUT_MS = 600_000;
 
 type RecallHost = {
   plugin: { root: string };

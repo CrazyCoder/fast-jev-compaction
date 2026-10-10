@@ -108,8 +108,8 @@ describe('recall in the hook', () => {
     const out = (await registered['command.run:recall-index']!($, { command: 'recall-index', args: '' }, async () => ({}))) as { text: string };
     expect(out.text).toMatch(/^No session index yet/);
     expect(JSON.parse(runs.at(-1)!.init!.stdin!)).toMatchObject({ indexCommand: '' });
-    // A build of every project can take minutes.
-    expect(runs.at(-1)!.init!.timeoutMs).toBeGreaterThanOrEqual(600_000);
+    // A build of every project can take minutes; the host takes 1 to 600,000 ms.
+    expect(runs.at(-1)!.init!.timeoutMs).toBe(600_000);
   });
 
   it('answers a call by running the recall script on the session transcript', async () => {
