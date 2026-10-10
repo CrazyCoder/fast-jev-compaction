@@ -1,0 +1,304 @@
+/**
+ * The recall tool's engine: search, expand and list the entries of a session
+ * transcript (readTranscript), within a fixed answer size.
+ *
+ * Adapted from pi-vcc (MIT, Copyright (c) 2026 sting8k): the BM25-lite ranking,
+ * the stopwords, the regex fallback and its nested-quantifier guard. The
+ * answer budget and its per-entry share follow pi-blackhole (MIT, Copyright
+ * (c) 2026 k0valik).
+ */
+import type { Entry } from './transcript.js';
+
+/** The most one recall answer holds, in characters. */
+export const RECALL_MAX_CHARS = 48_000;
+
+export type RecallRequest = {
+  /** Keywords, ranked by BM25; or a regex when it holds regex characters. */
+  query?: string;
+  /** Entries in full: `#N`, `N` or a tool_use_id. */
+  expand?: readonly (string | number)[];
+  /** Entries `from`..`to`, one short line each. */
+  range?: readonly [number, number];
+  /** 1-based page of query or range results. */
+  page?: number;
+  /** For expand: where in a long text to start, from a previous answer's footer. */
+  offset?: number;
+};
+
+export type RecallDeps = {
+  /** Reads a file Claude Code saved a large output to; undefined when it cannot. */
+  readFile?: (path: string) => string | undefined;
+};
+
+const QUERY_PAGE = 5;
+const RANGE_PAGE = 20;
+const SNIPPET_LINE_CHARS = 200;
+const PREVIEW_CHARS = 200;
+const INPUT_CHARS = 2_000;
+const EXPAND_FLOOR = 2_000;
+const EXPAND_OVERHEAD = 200;
+const SEARCH_BUDGET_MS = 3_000;
+
+const USAGE = [
+  'Give one of:',
+  '- query: keywords (ranked) or a regex, e.g. "redis timeout"; 5 hits per page.',
+  '- expand: ["#N" or a tool_use_id, ...]: those entries in full.',
+  '- range: [from, to]: entries #from..#to in order, one line each, 20 per page.',
+  'Add page: N for the next page of a query or range.',
+].join('\n');
+
+// ── regex safety (pi-vcc) ──
+
+const escapeRegex = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function quantifierAt(pattern: string, i: number): { len: number; unbounded: boolean } {
+  const c = pattern[i];
+  if (c === '+' || c === '*') return { len: 1, unbounded: true };
+  if (c === '{') {
+    const end = pattern.indexOf('}', i);
+    const body = end === -1 ? '' : pattern.slice(i + 1, end);
+    if (/^\d+(,\d*)?$/.test(body)) return { len: end - i + 1, unbounded: body.endsWith(',') };
+  }
+  return { len: 0, unbounded: false };
+}
+
+/** An unbounded quantifier on a group that holds one, such as `(a+)+`: exponential on a miss. */
+function hasNestedQuantifier(pattern: string): boolean {
+  const groups: boolean[] = [];
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === '\\') {
+      i += 1;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') {
+      inClass = true;
+      continue;
+    }
+    if (c === '(') {
+      groups.push(false);
+      continue;
+    }
+    if (c === ')') {
+      const inner = groups.pop() ?? false;
+      const q = quantifierAt(pattern, i + 1);
+      if (inner && q.unbounded) return true;
+      if (groups.length) groups[groups.length - 1] ||= inner || q.unbounded;
+      i += q.len;
+      continue;
+    }
+    const q = quantifierAt(pattern, i);
+    if (q.unbounded && groups.length) {
+      groups[groups.length - 1] = true;
+      i += q.len - 1;
+    }
+  }
+  return false;
+}
+
+/** The pattern as a case-insensitive regex, or as literal text when it is unsafe or invalid. */
+function safeRegex(pattern: string, flags = 'i'): RegExp {
+  if (!hasNestedQuantifier(pattern)) {
+    try {
+      return new RegExp(pattern, flags);
+    } catch {
+      // Invalid: matched as literal text below.
+    }
+  }
+  return new RegExp(escapeRegex(pattern), flags);
+}
+
+// ── ranking (pi-vcc BM25-lite) ──
+
+const STOPWORDS = new Set(
+  ('the a an is are was were be been being have has had do does did will would could should may might can shall ' +
+    'of in to for with on at from by as into through during before after above below between out off over under ' +
+    'again further then once here there when where why how all both each few more most other some such no nor not ' +
+    'only own same so than too very just about it its that this what which who whom these those').split(' '),
+);
+const BM25_K = 1.2;
+const BM25_B = 0.75;
+
+/** The searchable text of an entry. */
+function docOf(entry: Entry): string {
+  return entry.kind === 'call' ? `${entry.tool} ${JSON.stringify(entry.input)}\n${entry.result ?? ''}` : entry.text;
+}
+
+function deadline(): () => void {
+  const end = Date.now() + SEARCH_BUDGET_MS;
+  return () => {
+    if (Date.now() > end) throw new Error(`search took over ${SEARCH_BUDGET_MS} ms: use fewer or more specific words`);
+  };
+}
+
+/** The entries matching `query`, best first, with the regex that finds each hit's snippet. */
+function search(entries: readonly Entry[], query: string): { hits: Entry[]; marker: RegExp } {
+  const check = deadline();
+  const docs = entries.map(docOf);
+  if (/[|*+?{}()[\]\\^$]/.test(query)) {
+    const re = safeRegex(query);
+    const hits: Entry[] = [];
+    docs.forEach((doc, i) => {
+      check();
+      if (re.test(doc)) hits.push(entries[i]!);
+    });
+    return { hits: hits.reverse(), marker: re };
+  }
+  const words = query.split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()) && w.length > 1);
+  const terms = (meaningful.length > 0 ? meaningful : words).map((w) => new RegExp(escapeRegex(w), 'gi'));
+  const lengths = docs.map((doc) => doc.split(/\s+/).length);
+  const avg = lengths.reduce((a, b) => a + b, 0) / Math.max(docs.length, 1);
+  const df = terms.map((term) => docs.filter((doc) => doc.search(term) !== -1).length);
+  const scored = docs
+    .map((doc, i) => {
+      check();
+      let score = 0;
+      terms.forEach((term, t) => {
+        const tf = doc.match(term)?.length ?? 0;
+        if (tf === 0) return;
+        const idf = Math.log((docs.length - df[t]! + 0.5) / (df[t]! + 0.5) + 1);
+        score += (idf * (tf * (BM25_K + 1))) / (tf + BM25_K * (1 - BM25_B + (BM25_B * lengths[i]!) / avg));
+      });
+      return { entry: entries[i]!, score };
+    })
+    .filter((s) => s.score > 0)
+    // Best first; on a tie the later entry, as it is closer to the current work.
+    .sort((a, b) => b.score - a.score || b.entry.n - a.entry.n);
+  return { hits: scored.map((s) => s.entry), marker: new RegExp(terms.map((t) => t.source).join('|'), 'i') };
+}
+
+// ── rendering ──
+
+const clip = (text: string, chars: number): string => (text.length <= chars ? text : `${text.slice(0, chars)}…`);
+const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
+
+function heading(entry: Entry): string {
+  return entry.kind === 'call' ? `#${entry.n} call ${entry.tool} (${entry.id})` : `#${entry.n} ${entry.kind}`;
+}
+
+/** The input field that says most about a call, for one-line listings. */
+function gist(entry: Extract<Entry, { kind: 'call' }>): string {
+  for (const key of ['command', 'file_path', 'pattern', 'query', 'url', 'description', 'prompt']) {
+    const value = entry.input[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return JSON.stringify(entry.input);
+}
+
+/** A long line cut to the part around its first match. */
+function around(line: string, marker: RegExp): string {
+  if (line.length <= SNIPPET_LINE_CHARS) return line;
+  const at = Math.max(0, line.search(marker));
+  const start = Math.max(0, Math.min(at - SNIPPET_LINE_CHARS / 4, line.length - SNIPPET_LINE_CHARS));
+  return `${start > 0 ? '…' : ''}${line.slice(start, start + SNIPPET_LINE_CHARS)}${start + SNIPPET_LINE_CHARS < line.length ? '…' : ''}`;
+}
+
+/** Up to two lines either side of the first line `marker` matches. */
+function snippet(text: string, marker: RegExp): string {
+  const lines = text.split('\n');
+  const at = Math.max(0, lines.findIndex((line) => marker.test(line)));
+  return lines
+    .slice(Math.max(0, at - 2), at + 3)
+    .map((line) => `  ${around(line, marker)}`)
+    .join('\n');
+}
+
+function pager(total: number, size: number, page: number): { from: number; pages: number; page: number } {
+  const pages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(1, Math.floor(page)), pages);
+  return { from: (current - 1) * size, pages, page: current };
+}
+
+function runQuery(entries: readonly Entry[], query: string, page: number): string {
+  const { hits, marker } = search(entries, query);
+  if (hits.length === 0) return `No match for "${query}".`;
+  const p = pager(hits.length, QUERY_PAGE, page);
+  const blocks = hits
+    .slice(p.from, p.from + QUERY_PAGE)
+    .map((entry) => `${heading(entry)}\n${snippet(docOf(entry), marker)}`);
+  const next = p.page < p.pages ? ` Next: page: ${p.page + 1}.` : '';
+  return [
+    `${hits.length} match(es) for "${query}", page ${p.page}/${p.pages}:`,
+    ...blocks,
+    `Full text: expand: ["#N"] or a tool_use_id.${next}`,
+  ].join('\n\n');
+}
+
+function runRange(entries: readonly Entry[], [from, to]: readonly [number, number], page: number): string {
+  const picked = entries.filter((e) => e.n >= Math.min(from, to) && e.n <= Math.max(from, to));
+  if (picked.length === 0) return `No entries in #${from}..#${to} (the session has ${entries.length}).`;
+  const p = pager(picked.length, RANGE_PAGE, page);
+  const lines = picked.slice(p.from, p.from + RANGE_PAGE).map((entry) => {
+    const text = entry.kind === 'call' ? `${entry.tool} (${entry.id}): ${gist(entry)}` : entry.text;
+    return `#${entry.n} ${entry.kind} ${clip(oneLine(text), PREVIEW_CHARS)}`;
+  });
+  const next = p.page < p.pages ? `\nNext: page: ${p.page + 1}.` : '';
+  return `Entries #${from}..#${to}, page ${p.page}/${p.pages}:\n${lines.join('\n')}${next}`;
+}
+
+/** What each of `count` expanded entries may take of the budget (pi-blackhole's split). */
+function share(count: number): number {
+  const usable = Math.max(0, RECALL_MAX_CHARS - 400 - count * EXPAND_OVERHEAD);
+  const even = Math.floor(usable / count);
+  return count * EXPAND_FLOOR <= usable ? Math.max(even, EXPAND_FLOOR) : even;
+}
+
+/** `text` from `offset`, cut at a line end within `room`; the cut says where to go on. */
+function window(text: string, offset: number, room: number, ref: string): string {
+  const rest = text.slice(offset);
+  if (rest.length <= room) return rest;
+  const newline = rest.lastIndexOf('\n', room - 1);
+  const end = newline > 0 ? newline + 1 : room;
+  const next = offset + end;
+  return `${rest.slice(0, end)}[cut at ${next} of ${text.length} chars; continue: expand: ["${ref}"], offset: ${next}]`;
+}
+
+function runExpand(entries: readonly Entry[], refs: readonly (string | number)[], offset: number, deps: RecallDeps): string {
+  const found: Entry[] = [];
+  const missing: string[] = [];
+  for (const ref of refs) {
+    const text = String(ref).trim();
+    const number = /^#?(\d+)$/.exec(text)?.[1];
+    const entry = number
+      ? entries.find((e) => e.n === Number(number))
+      : entries.find((e) => e.kind === 'call' && e.id === text);
+    if (entry && !found.includes(entry)) found.push(entry);
+    else if (!entry) missing.push(text);
+  }
+  const room = found.length > 0 ? share(found.length) : 0;
+  const blocks = found.map((entry) => {
+    if (entry.kind !== 'call') return `${heading(entry)}\n${window(entry.text, offset, room, `#${entry.n}`)}`;
+    const saved = entry.savedTo ? deps.readFile?.(entry.savedTo) : undefined;
+    const result = saved ?? entry.result ?? '(no result)';
+    const input = offset === 0 ? `input:\n${clip(JSON.stringify(entry.input, null, 2), INPUT_CHARS)}\n` : '';
+    const label = `result${entry.isError ? ' (error)' : ''}${saved ? `, from ${entry.savedTo}` : ''}:\n`;
+    return `${heading(entry)}\n${input}${label}${window(result, offset, room - input.length - label.length, entry.id)}`;
+  });
+  if (missing.length > 0) blocks.push(`Not found: ${missing.join(', ')}.`);
+  return blocks.join('\n\n');
+}
+
+/**
+ * Answers one recall request over a session's entries. Recall's own calls are
+ * left out: a query would always find itself.
+ */
+export function runRecall(all: readonly Entry[], request: RecallRequest, deps: RecallDeps = {}): string {
+  const entries = all.filter((e) => !(e.kind === 'call' && e.tool.endsWith('__recall')));
+  const page = request.page ?? 1;
+  try {
+    if (request.expand && request.expand.length > 0) {
+      return runExpand(entries, request.expand, Math.max(0, Math.floor(request.offset ?? 0)), deps);
+    }
+    if (request.range) return runRange(entries, request.range, page);
+    if (request.query?.trim()) return runQuery(entries, request.query.trim(), page);
+  } catch (error) {
+    return `Recall failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return USAGE;
+}
