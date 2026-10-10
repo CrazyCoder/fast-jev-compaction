@@ -1,11 +1,13 @@
 # JetCompact Claude Code mod
 
 This plugin uses Claude Code function hooks to replace a compaction with the
-original messages, minus the tool calls and tool results Jev judged no longer
-needed. `hooks/jetcompact.ts` is a thin adapter: it reads the plugin options,
-finds the TypeSafe key, hands `session.compact` transcripts to the `jetcompact`
-library in `src/` (the plugin folder is the repository root, so the hook imports
-it directly) and maps the result back onto session messages. User and assistant
+original messages, minus the tool calls and tool results a fast decision model
+judged no longer needed: TypeSafe's Jev by default, or OpenAI's Decisions API
+(`provider: "openai"`). Below, "Jev" stands for whichever provider is set.
+`hooks/jetcompact.ts` is a thin adapter: it reads the plugin options, finds the
+provider's key, hands `session.compact` transcripts to the `jetcompact` library
+in `src/` (the plugin folder is the repository root, so the hook imports it
+directly) and maps the result back onto session messages. User and assistant
 prose in the recent turns is never touched; only host-generated blocks (system
 reminders, task notifications, command echoes, hook output) outside the pinned
 messages are cut to a head and a marker (`trimHostText`). Jev is sent the whole

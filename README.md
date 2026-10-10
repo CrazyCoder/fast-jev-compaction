@@ -1,11 +1,12 @@
 # JetCompact
 
-Claude Code plugin that replaces the compaction summary with Jev decisions. The
-newest turns stay verbatim, every older tool call and result is scored by
-[Jev](https://typesafe.ai) (or, opt-in, OpenAI's Decisions API) and kept or cut
-accordingly, host notices are trimmed, and old prose can be condensed into a
-digest. Nothing is lost: the `recall` tool reads back what a compaction cut, and
-searches your past sessions.
+Claude Code plugin that replaces the compaction summary with the decisions of a
+fast decision model. The newest turns stay verbatim, every older tool call and
+result is scored by the model and kept or cut accordingly, host notices are
+trimmed, and old prose can be condensed into a digest. The model is TypeSafe's
+[Jev](https://typesafe.ai) by default, or OpenAI's Decisions API
+(`provider: "openai"`). Nothing is lost: the `recall` tool reads back what a
+compaction cut, and searches your past sessions.
 
 JetCompact is a fork of
 [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction). It

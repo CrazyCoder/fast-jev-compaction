@@ -1,7 +1,7 @@
 {
   "name": "jetcompact",
   "version": "0.10.0",
-  "description": "Continuous, verbatim context compaction for LLM agents using TypeSafe's Jev model.",
+  "description": "Verbatim context compaction for LLM agents, guided by a fast decision model (TypeSafe Jev or OpenAI Decisions).",
   "type": "module",
   "license": "MIT",
   "engines": {

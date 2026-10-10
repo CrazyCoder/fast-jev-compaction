@@ -8,10 +8,10 @@
     {
       "name": "jetcompact",
       "source": "./",
-      "description": "JetCompact: verbatim Jev-guided compaction for Claude Code, with a recall tool that reads back what compaction cut and searches past sessions.",
+      "description": "JetCompact: verbatim Claude Code compaction guided by a fast decision model (Jev or OpenAI Decisions), with a recall tool that reads back what compaction cut and searches past sessions.",
       "version": "0.10.0",
       "license": "MIT"
     }
   ],
-  "description": "Replace Claude Code compaction summaries with verbatim Jev-scored history pruning."
+  "description": "Claude Code plugins by CrazyCoder."
 }
