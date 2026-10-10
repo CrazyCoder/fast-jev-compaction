@@ -64,6 +64,7 @@ Jev model is also served through OpenRouter, at
 | `maxStateTokens` | `25000` | Estimated token ceiling for the state |
 | `maxRequestTokens` | `30000` | Estimated ceiling for state plus one batch of questions |
 | `maxConcurrentRequests` | `4` | Jev requests in flight at once |
+| `instructions` | none | What the user asked this compaction to keep; added to the goal, capped at 2000 characters |
 | `truncateHeadChars` | `300` | Characters of a dropped tool result retained before its note |
 | `dropCalls` | `false` | `true` removes a no-longer-needed call with its result; `false` leaves a stub of the call |
 | `trimHostText` | `true` | Cut host-generated blocks (`<system-reminder>`, `<task-notification>`, command echoes, hook output; never user prose) outside the pinned messages to a head plus a marker |

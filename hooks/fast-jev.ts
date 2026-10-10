@@ -572,7 +572,8 @@ export const register: Register = (on: On, options: PluginOptions) => {
       return { skip: `fast-jev-compaction: ${reason}; conversation left as it is` };
     };
     try {
-      const config = { ...configured, apiKey: await getApiKey($, configured) };
+      // `/compact <instructions>`: what the user wants kept, for Jev's goal.
+      const config = { ...configured, apiKey: await getApiKey($, configured), instructions: event.instructions };
       let redacted = 0;
       const { result, messages } = await withCompactionDeadline(
         () =>

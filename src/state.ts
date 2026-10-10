@@ -100,6 +100,9 @@ export function sliceSurrogateSafe(text: string, start: number, end: number): st
   return text.slice(s, e);
 }
 
+/** How much of `/compact <instructions>` goes into the goal, as recent prompts are capped at 500. */
+export const MAX_INSTRUCTION_CHARS = 2_000;
+
 export function truncate(text: string, limit: number): string {
   return text.length <= limit
     ? text

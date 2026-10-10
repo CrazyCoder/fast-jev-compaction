@@ -110,8 +110,9 @@ both probabilities for diagnosis. The debug log exists only under
 `claude --debug`, so each outcome is also appended as one timestamped line,
 labelled with the trigger, to `~/.claude/fast-jev-compaction/compactions.log`
 (under `CLAUDE_CONFIG_DIR` when set; the newest 200 lines are kept), together
-with each `/compact` the hook queues in a headless session. The
-`turn.complete` hook requests
+with each `/compact` the hook queues in a headless session. Text typed after
+`/compact` goes into Jev's goal as what the user asked the compaction to keep
+(the first 2000 characters). The `turn.complete` hook requests
 compaction when `context.percent` reaches `compactAtPercent`, with an
 in-flight guard. When that request is skipped, the hook waits until the
 context has grown by another 10 percentage points, or dropped below

@@ -105,6 +105,8 @@ export type OldProseMode = 'keep' | 'summarize' | 'digest';
 export interface CompactOptions {
   /** Ongoing task description; defaults to the last few user prompts. */
   goal?: string;
+  /** What the user asked this compaction to keep (`/compact <instructions>`); added to the goal. */
+  instructions?: string;
   /** `threshold` compares Jev's probabilities to `keepThreshold`; `rank` spends token budgets on the best-scored calls. Default `rank`. */
   keepMode?: KeepMode;
   /** Threshold mode: minimum keep probability for a call or result to stay. Default 0.5. */
@@ -155,6 +157,7 @@ export interface CompactOptions {
 
 export interface ResolvedCompactOptions {
   goal: string;
+  instructions: string;
   keepMode: KeepMode;
   keepThreshold: number;
   keepResultTokens: number;

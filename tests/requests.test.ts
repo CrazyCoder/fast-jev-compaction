@@ -5,6 +5,7 @@ import {
   fitState,
   JevRequestError,
   JevTransportError,
+  MAX_INSTRUCTION_CHARS,
   parseJevResponse,
   type JevAsker,
   type JevQuestions,
@@ -62,6 +63,27 @@ function jev(fail: (id: string, attempt: number) => Reply = () => 0.1) {
 }
 
 const noWait = { sleep: async () => {} };
+
+describe('/compact instructions', () => {
+  it('adds them to the goal Jev sees, capped at MAX_INSTRUCTION_CHARS', async () => {
+    const states: { goal: string }[] = [];
+    const asker: JevAsker = {
+      async ask(state, questions) {
+        states.push(state as { goal: string });
+        return { answers: Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul' as const, noul: 0.5 }])) };
+      },
+    };
+    await compact(transcript(2), asker, { preserveRecentMessages: 1, instructions: `  keep the API design ${'x'.repeat(5000)}` });
+    const goal = states[0]!.goal;
+    expect(goal).toMatch(/^Fix the bug\.\n/);
+    expect(goal).toContain('The user asked this compaction to keep: keep the API design');
+    expect(goal.length).toBeLessThan(MAX_INSTRUCTION_CHARS + 200);
+
+    states.length = 0;
+    await compact(transcript(2), asker, { preserveRecentMessages: 1, instructions: '   ' });
+    expect(states[0]!.goal).not.toContain('asked this compaction');
+  });
+});
 
 describe('Jev request policy', () => {
   it('classifies HTTP failures', () => {

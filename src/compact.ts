@@ -1,7 +1,15 @@
 import { trimHostText } from './host-text.js';
 import { condenseOldProse, DEFAULT_RECENT_TURNS, type ProseSummarizer } from './prose.js';
 import { isRetryable, noulAnswer, stopsAll } from './request.js';
-import { collectToolCalls, estimateTokens, fitState, goalFromMessages, isPinned } from './state.js';
+import {
+  collectToolCalls,
+  estimateTokens,
+  fitState,
+  goalFromMessages,
+  isPinned,
+  MAX_INSTRUCTION_CHARS,
+  truncate,
+} from './state.js';
 import type {
   CallAction,
   CallAnswer,
@@ -19,6 +27,7 @@ import type {
 
 export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   goal: '',
+  instructions: '',
   keepMode: 'rank',
   keepThreshold: 0.5,
   keepResultTokens: 12_000,
@@ -46,6 +55,7 @@ function finite(value: number | undefined, fallback: number): number {
 export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOptions {
   return {
     goal: options.goal ?? DEFAULT_OPTIONS.goal,
+    instructions: options.instructions?.trim() ?? DEFAULT_OPTIONS.instructions,
     keepMode: options.keepMode === 'threshold' ? 'threshold' : DEFAULT_OPTIONS.keepMode,
     keepThreshold: finite(options.keepThreshold, DEFAULT_OPTIONS.keepThreshold),
     keepResultTokens: Math.max(
@@ -551,7 +561,13 @@ export async function compact(
   let requestsFailed = 0;
   let answers = new Map<string, CallAnswer>();
   if (candidates.length > 0) {
-    const { groups, stage } = stateGroups(messages, calls, candidates, resolved);
+    const goal = resolved.instructions
+      ? `${resolved.goal || goalFromMessages(messages)}\nThe user asked this compaction to keep: ${truncate(
+          resolved.instructions,
+          MAX_INSTRUCTION_CHARS,
+        )}`
+      : resolved.goal;
+    const { groups, stage } = stateGroups(messages, calls, candidates, { ...resolved, goal });
     fitted = { tokens: Math.max(0, ...groups.map((group) => group.state.tokens)), stage };
     const jobs = groups.flatMap((group) =>
       batchCalls(group.calls, group.state.tokens, resolved).map((batch) => ({ state: group.state.state, batch })),
