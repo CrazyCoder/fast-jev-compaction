@@ -22,6 +22,8 @@ First release of the CrazyCoder fork, based on QuanticPotatoes 0.8.0.
 - `/recall-index`: shows the session index, builds it now for all projects or
   the ones named by name part, path, folder or `.`, takes projects out of it, or
   removes it.
+- A cross-session search that covers this session's project ends with how many
+  matches this session holds, since its hits leave this session out.
 - `tools/node.cmd`: a pinned Node.js, downloaded from nodejs.org and checked by
   SHA-256 on first use, which runs the recall tool; CI checks the line endings
   of the `.cmd` files and runs the wrapper on Linux, macOS and Windows.
