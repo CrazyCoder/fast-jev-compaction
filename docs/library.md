@@ -100,7 +100,7 @@ Plugin-only options (set as plugin options, see
 percentage, the Jev result is given up for the built-in summary on automatic
 compactions, or skipped otherwise), `envFile`. With `oldProse` unset, the plugin
 first retries a refused result with `oldProse: 'digest'`, and then, whatever
-`oldProse` is, with a harder cut (`ageCutResults`, half the keep budgets,
+`oldProse` is, with a harder cut (half the keep budgets,
 `truncateHeadChars: 100`); see
 [Adaptive prose digest](../README.md#adaptive-prose-digest).
 

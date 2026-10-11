@@ -705,6 +705,33 @@ describe('when Claude Code moves on', () => {
     expect(out).toEqual({ skip: 'interrupted' });
     expect(delegated).toBe(false);
   });
+
+  it('hands back nothing when Claude Code moves on while the result is finished', async () => {
+    const controller = new AbortController();
+    const { $ } = host(jevFetch(() => 0.1));
+    // Esc lands after Jev answered, while the hidden content is read.
+    const late = { ...$, session: { messages: async () => (controller.abort(), []) } };
+    const next = Object.assign(async () => CORE, { signal: controller.signal });
+    const out = await hooks({ preserveRecentMessages: 1, keepMode: 'threshold', dropCalls: true })['session.compact']!(
+      late,
+      { trigger: 'manual', messages: transcript() },
+      next,
+    );
+    expect(out).toEqual({ skip: 'interrupted' });
+  });
+});
+
+describe('a Jev error status', () => {
+  it('is asked again by the retry, not answered from the first reply', async () => {
+    let requests = 0;
+    const ok = jevFetch(() => 0.1);
+    const flaky = (async (url: string, init?: { body?: string }) =>
+      ++requests === 1 ? { status: 503, ok: false, text: 'busy' } : ok(url, init)) as ReturnType<typeof jevFetch>;
+    const { out, delegated } = await compactWith('manual', flaky, { keepMode: 'threshold' });
+    expect(requests).toBe(2);
+    expect(delegated).toBe(false);
+    expect(out).toHaveProperty('messages');
+  });
 });
 
 describe('a built-in summary that fails', () => {
@@ -933,7 +960,15 @@ describe('the harder cut', () => {
     ]);
     expect(out.messages).toBeDefined();
     expect(notice).not.toMatch(/was refused/);
-    expect(notice).toMatch(/1 earlier cuts? aged/);
+  });
+
+  it('is not set off by a tool output that quotes another call\'s cut note', async () => {
+    // A log read back, ending with a note this plugin wrote for call "x".
+    const { notice } = await compactThree([
+      call('log', 'Read', { file_path: 'compactions.log' }, ''),
+      result('log', `${'l'.repeat(300)}\n[jetcompact truncated 9000 chars of this tool result; full text: recall expand ["x"]]`),
+    ]);
+    expect(notice).toMatch(/; verbatim prose was refused \(below 25% minimum\)$/);
   });
 });
 

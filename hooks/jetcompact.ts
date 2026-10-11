@@ -9,7 +9,14 @@ import type {
 } from 'claude-code';
 
 import { PLUGIN_ID } from '../src/brand.js';
-import { compact, CompactionInterrupted, DEFAULT_OPTIONS, reductionRatio, resolveOptions } from '../src/compact.js';
+import {
+  compact,
+  CompactionInterrupted,
+  DEFAULT_OPTIONS,
+  ownCutNote,
+  reductionRatio,
+  resolveOptions,
+} from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
 import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
@@ -70,8 +77,8 @@ export interface CompactionPlan {
  * Replaying long sessions, verbatim prose let each compaction end higher than
  * the last until compaction was refused for good; the digest kept it bounded.
  *
- * Last, a harder cut: results an earlier compaction already cut keep only
- * their note, the keep budgets halve and heads shrink to 100 characters. In
+ * Last, a harder cut: the keep budgets halve and heads shrink to 100
+ * characters. In
  * the A/B evals a compaction soon after a light one often freed under 25% and
  * fell back to the built-in summary; this tries what is left first.
  *
@@ -85,7 +92,6 @@ export function compactionPlans(config: HookConfig, messages: readonly Message[]
   const canDigest = Boolean(splitOldProse(messages, config.recentTurns ?? DEFAULT_RECENT_TURNS));
   const hasDigest = messages.some((message) => parseCondensed(message)?.kind === 'digest');
   const harderOptions = {
-    ageCutResults: config.ageCutResults ?? true,
     keepResultTokens: half(config.keepResultTokens, DEFAULT_OPTIONS.keepResultTokens),
     keepCallTokens: half(config.keepCallTokens, DEFAULT_OPTIONS.keepCallTokens),
     truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
@@ -108,8 +114,9 @@ export function compactionPlans(config: HookConfig, messages: readonly Message[]
 
 /** Whether an earlier compaction cut a result in `messages`. */
 function compactedBefore(messages: readonly Message[]): boolean {
-  const marker = `[${PLUGIN_ID} truncated `;
-  return messages.some((message) => (message.toolResults ?? []).some((result) => result.text.includes(marker)));
+  return messages.some((message) =>
+    (message.toolResults ?? []).some((result) => ownCutNote(result.tool_use_id, result.text)),
+  );
 }
 
 /**
@@ -841,6 +848,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
       await appendCompactionLog($, `${trigger} interrupted: Claude Code moved on; nothing handed back`);
       return { skip: 'interrupted' };
     };
+    // Every await can outlast Claude Code's patience: look again right before
+    // a result goes back.
+    const handBack = (messages: SessionMessage[]) => (next.signal?.aborted ? interrupted() : { messages });
     // The guards keep automatic compactions from running back to back; a
     // /compact the person typed is applied whenever it frees anything.
     const installBest = async (why: string, chosen: NonNullable<typeof best>) => {
@@ -850,12 +860,13 @@ export const register: Register = (on: On, options: PluginOptions) => {
         `kept the smallest result although ${why}, since /compact was typed (${chosen.detail})`,
         `compacted, ${percent(chosen.ratio)} smaller`,
       );
-      return { messages: chosen.messages };
+      return handBack(chosen.messages);
     };
     const giveUp = async (why: string) => {
       if (next.signal?.aborted) return interrupted();
       if (mayUseBuiltin(trigger, configured.builtinFallback)) {
         await notify($, trigger, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
+        if (next.signal?.aborted) return interrupted();
         try {
           // The queued marker is not an instruction for the summarizer either.
           return await next(queued ? { ...event, instructions: undefined } : event);
@@ -865,7 +876,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
           if (!best || next.signal?.aborted) throw error;
           const failure = error instanceof Error ? error.message : String(error);
           await notify($, trigger, `built-in summary failed (${failure}); kept this compaction instead: ${best.detail}`, 'built-in summary failed, kept own result');
-          return { messages: best.messages };
+          return handBack(best.messages);
         }
       }
       await notify($, trigger, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
@@ -922,8 +933,12 @@ export const register: Register = (on: On, options: PluginOptions) => {
                   text: response.text,
                 }));
                 replies.set(key, reply);
-                // A failed request is asked again by the next plan.
-                reply.catch(() => replies.delete(key));
+                // A failed request, or an error status, is asked again by a
+                // retry or the next plan.
+                reply.then(
+                  (answer) => answer.ok || replies.delete(key),
+                  () => replies.delete(key),
+                );
                 return reply;
               },
               (count) => {
@@ -988,7 +1003,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
             `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(measured)})${hiddenNote}${retried}`,
             `compacted, ${percent(reductionRatio(measured))} smaller (${messages.length}/${event.messages.length} messages)`,
           );
-          return { messages: withoutHandles(returned) };
+          return handBack(withoutHandles(returned));
         }
         refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }

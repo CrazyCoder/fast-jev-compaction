@@ -142,15 +142,16 @@ compaction; `/compact` (`manual`), another plugin's request (`plugin`) and
 `precompute` answer `{ skip }` instead, so the conversation stays as it is and
 Claude Code shows why. `always` delegates on every trigger; `never` on none.
 When the built-in summary itself fails, the hook installs its own result if that
-freed anything. When Claude Code moves on (Esc, the hook's time budget, another
-hook settling first), the in-flight request is abandoned and nothing is returned
-or delegated. A result Claude Code refuses is logged, and the built-in summary
-runs only where `builtinFallback` allows it. The outcome is shown as a one-line
-toast. The debug log (`$.ui.log` with `to: 'debug'`, nothing in the transcript)
-gets the reduction, per-reason counts, state size and request count, and a
-per-call `decisions:` line with both probabilities for diagnosis. The debug log
-exists only under `claude --debug`, so each outcome is also appended as one
-timestamped line, labelled with the trigger, to
+freed anything. When Claude Code moves on (Esc, another hook settling first),
+the in-flight request is abandoned and nothing is returned or delegated; the
+signal is checked again right before a result goes back. When the hook runs over
+Claude Code's time budget, or Claude Code refuses its result, that is logged and
+the built-in summary runs only where `builtinFallback` allows it. The outcome is
+shown as a one-line toast. The debug log (`$.ui.log` with `to: 'debug'`, nothing
+in the transcript) gets the reduction, per-reason counts, state size and request
+count, and a per-call `decisions:` line with both probabilities for diagnosis.
+The debug log exists only under `claude --debug`, so each outcome is also
+appended as one timestamped line, labelled with the trigger, to
 `~/.claude/jetcompact/compactions.log` (under `CLAUDE_CONFIG_DIR` when set; the
 newest 200 lines are kept), together with each `/compact` the hook queues in a
 headless session. Text typed after `/compact` goes into Jev's goal as what the

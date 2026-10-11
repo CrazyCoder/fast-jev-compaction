@@ -3,6 +3,7 @@ import {
   algorithmicAnswers,
   applyDecisions,
   batchCalls,
+  CompactionInterrupted,
   buildJevRequest,
   collectToolCalls,
   compact,
@@ -660,7 +661,9 @@ describe('compact', () => {
       tc('Read', { file_path: 'c:/app/d.ts' }), // t7
       tc('Edit', { file_path: 'c:/app/a.ts', old_string: 'a', new_string: 'b' }), // t8
       tc('Read', { file_path: 'C:/app/b.ts' }), // t9
-      tc('Read', { file_path: 'c:/app/c.ts' }), // t10: control, newest of its kind
+      tc('WebFetch', { url: 'https://a.example' }, { isError: true }), // t10: no path; t11 does not fix it
+      tc('WebFetch', { url: 'https://b.example' }), // t11
+      tc('Read', { file_path: 'c:/app/c.ts' }), // t12: control, newest of its kind
     ];
     const s = algorithmicAnswers(calls);
     expect(s.get('t1')!.keepResult).toBeLessThanOrEqual(0.05);
@@ -670,7 +673,19 @@ describe('compact', () => {
     expect(s.get('t5')!.keepResult).toBeLessThan(0.3);
     expect(s.get('t6')!.keepCall).toBeGreaterThanOrEqual(0.9);
     expect(s.get('t9')!.keepResult).toBeGreaterThan(0.6);
-    expect(s.get('t10')!.keepResult).toBeGreaterThan(0.8);
+    expect(s.get('t10')!.keepResult).toBeGreaterThanOrEqual(0.9);
+    expect(s.get('t12')!.keepResult).toBeGreaterThan(0.8);
+  });
+
+  it('starts nothing once the signal is aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let summarized = 0;
+    const summarize = async () => (summarized++, 'SUMMARY');
+    await expect(
+      compact(transcript(), fakeJev(() => 0.1), { oldProse: 'summarize', decider: 'algorithmic' }, { summarize, signal: controller.signal }),
+    ).rejects.toBeInstanceOf(CompactionInterrupted);
+    expect(summarized).toBe(0);
   });
 
   it('asks with true/false criteria only under questionCriteria', async () => {
