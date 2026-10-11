@@ -727,16 +727,18 @@ describe('built-in summary fallback', () => {
     const { out, delegated, notices } = await compactWith('manual', jevFetch(() => 0.9));
     expect(delegated).toBe(false);
     expect(out).toEqual({
-      skip: expect.stringMatching(/^jetcompact: below 25% minimum: 0% reduction; .*; conversation left as it is$/),
+      skip: expect.stringMatching(
+        /^jetcompact: verbatim prose refused \(below 25% minimum\); harder cut: below 25% minimum: 0% reduction; .*; conversation left as it is$/,
+      ),
     });
-    expect(notices.at(-1)).toMatch(/^not compacted, no built-in summary \(below 25% minimum/);
+    expect(notices.at(-1)).toMatch(/^not compacted, no built-in summary \(verbatim prose refused \(below 25% minimum\); harder cut: below 25% minimum/);
   });
 
   it('hands an engine auto compaction that Jev cannot shrink to the built-in summary', async () => {
     const { out, delegated, notices } = await compactWith('auto', jevFetch(() => 0.9));
     expect(delegated).toBe(true);
     expect(out).toBe(CORE);
-    expect(notices.at(-1)).toMatch(/^fallback to built-in summary \(below 25% minimum/);
+    expect(notices.at(-1)).toMatch(/^fallback to built-in summary \(verbatim prose refused \(below 25% minimum\); harder cut: below 25% minimum/);
   });
 
   it('skips on a Jev failure unless the engine itself is compacting', async () => {
@@ -855,6 +857,29 @@ describe('auto-compaction at compactAtPercent', () => {
     await t.run();
     await t.run();
     expect(t.commands).toEqual(['compact']);
+  });
+});
+
+describe('the harder cut', () => {
+  it('cuts with half the budgets when the first attempt keeps too much, and asks Jev once', async () => {
+    const bodies: string[] = [];
+    const { $, notices } = host(jevFetch(() => 0.9, bodies));
+    // Three results that just fit keepResultTokens (12000) together; half of
+    // it keeps one.
+    const messages = [
+      message('user', 'Fix the parser.'),
+      ...['a', 'b', 'c'].flatMap((id) => [call(id, 'Read', { file_path: `src/${id}.ts` }, ''), result(id, id.repeat(15_000))]),
+      message('assistant', 'Read them.'),
+      message('user', 'next'),
+    ];
+    const out = (await hooks({ preserveRecentMessages: 1 })['session.compact']!(
+      $,
+      { trigger: 'auto', messages },
+      async () => ({ messages: [] }),
+    )) as { messages?: unknown[] };
+    expect(out.messages).toBeDefined();
+    expect(notices.at(-1)).toMatch(/; verbatim prose was refused \(below 25% minimum\)$/);
+    expect(bodies).toHaveLength(1);
   });
 });
 
@@ -1005,7 +1030,9 @@ describe('old prose through the hook', () => {
 
   it('names the verbatim refusal when the digest is refused too', async () => {
     const { out } = await compactPlain({ minReductionRatio: 0.99 }, turns(12));
-    expect(out.skip).toMatch(/verbatim prose refused \(below 99% minimum\); digest: below 99% minimum/);
+    expect(out.skip).toMatch(
+      /verbatim prose refused \(below 99% minimum\); digest refused \(below 99% minimum\); harder cut: below 99% minimum/,
+    );
   });
 
   it('starts verbatim after a summary, which is not a digest', async () => {

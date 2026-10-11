@@ -9,7 +9,7 @@ import type {
 } from 'claude-code';
 
 import { PLUGIN_ID } from '../src/brand.js';
-import { compact, CompactionInterrupted, reductionRatio, resolveOptions } from '../src/compact.js';
+import { compact, CompactionInterrupted, DEFAULT_OPTIONS, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
 import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
@@ -53,26 +53,54 @@ const HOOK_DEFAULTS = {
 /** Characters of a cut result's head once old prose is digested, unless `truncateHeadChars` is set. */
 const DIGEST_HEAD_CHARS = 100;
 
+export interface CompactionPlan {
+  /** How the plan is named in a refusal: `verbatim prose`, `digest`, `harder cut`. */
+  label: string;
+  options: Partial<CompactOptions>;
+}
+
 /**
- * The old-prose settings each compaction tries in order, the first that clears
- * the size guards winning. A set `oldProse` is used as it is. Unset, old prose
- * stays verbatim, which suits sessions that compact once or twice; when that
- * would be refused, or while the conversation holds a digest from an earlier
+ * The settings each compaction tries in order, the first that clears the size
+ * guards winning.
+ *
+ * Old prose: a set `oldProse` is used as it is. Unset, old prose stays
+ * verbatim, which suits sessions that compact once or twice; when that would
+ * be refused, or while the conversation holds a digest from an earlier
  * compaction, the old prose is digested and cut results keep shorter heads.
- * With no turn old enough to digest there is nothing to retry. Replaying long
- * sessions, verbatim prose let each compaction end higher than the last until
- * compaction was refused for good; switching to the digest kept it bounded.
+ * Replaying long sessions, verbatim prose let each compaction end higher than
+ * the last until compaction was refused for good; the digest kept it bounded.
+ *
+ * Last, a harder cut: results an earlier compaction already cut keep only
+ * their note, the keep budgets halve and heads shrink to 100 characters. In
+ * the A/B evals a compaction soon after a light one often freed under 25% and
+ * fell back to the built-in summary; this tries what is left first.
  */
-export function prosePlans(config: HookConfig, messages: readonly Message[]): Partial<CompactOptions>[] {
-  if (config.oldProse) return [{}];
-  const verbatim: Partial<CompactOptions> = { oldProse: 'keep' };
-  const digest: Partial<CompactOptions> = {
-    oldProse: 'digest',
-    truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
+export function compactionPlans(config: HookConfig, messages: readonly Message[]): CompactionPlan[] {
+  const half = (value: number | undefined, fallback: number) => Math.floor((value ?? fallback) / 2);
+  const canDigest = Boolean(splitOldProse(messages, config.recentTurns ?? DEFAULT_RECENT_TURNS));
+  const hasDigest = messages.some((message) => parseCondensed(message)?.kind === 'digest');
+  const prose: CompactionPlan[] = config.oldProse
+    ? [{ label: 'configured', options: {} }]
+    : hasDigest
+      ? [{ label: 'digest', options: { oldProse: 'digest', truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS } }]
+      : [
+          { label: 'verbatim prose', options: { oldProse: 'keep' } },
+          ...(canDigest
+            ? [{ label: 'digest', options: { oldProse: 'digest' as const, truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS } }]
+            : []),
+        ];
+  const last = prose.at(-1)!.options;
+  const harder: CompactionPlan = {
+    label: 'harder cut',
+    options: {
+      ...last,
+      ageCutResults: config.ageCutResults ?? true,
+      keepResultTokens: half(config.keepResultTokens, DEFAULT_OPTIONS.keepResultTokens),
+      keepCallTokens: half(config.keepCallTokens, DEFAULT_OPTIONS.keepCallTokens),
+      truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
+    },
   };
-  if (messages.some((message) => parseCondensed(message)?.kind === 'digest')) return [digest];
-  if (!splitOldProse(messages, config.recentTurns ?? DEFAULT_RECENT_TURNS)) return [verbatim];
-  return [verbatim, digest];
+  return [...prose, harder];
 }
 
 /**
@@ -640,7 +668,9 @@ async function notify(
 
 /** The head of a fallback reason, before its `: details` part, for a toast. */
 function toastReason(why: string): string {
-  const head = why.split(': ')[0]!;
+  // The last plan's reason, without the earlier plans' refusals before it.
+  const last = why.replace(/^(?:.+? refused \(.*?\); )+[a-z ]+: /, '');
+  const head = last.split(': ')[0]!;
   return head.length > TOAST_REASON_CHARS ? `${head.slice(0, TOAST_REASON_CHARS - 1)}…` : head;
 }
 
@@ -788,10 +818,13 @@ export const register: Register = (on: On, options: PluginOptions) => {
       const reason = why.length > 200 ? `${why.slice(0, 200)}…` : why;
       return { skip: `${PLUGIN_ID}: ${reason}; conversation left as it is` };
     };
-    // Why verbatim prose was refused, once the digest is being tried.
-    let verbatimRefused = '';
+    // Why earlier plans were refused, once a later one is being tried.
+    const refused: { label: string; why: string }[] = [];
+    let currentLabel = '';
     const afterVerbatim = (why: string) =>
-      verbatimRefused ? `verbatim prose refused (${verbatimRefused}); digest: ${why}` : why;
+      refused.length > 0
+        ? `${refused.map((r) => `${r.label} refused (${r.why})`).join('; ')}; ${currentLabel}: ${why}`
+        : why;
     try {
       // `/compact <instructions>`: what the user wants kept, for Jev's goal.
       const config = {
@@ -809,9 +842,14 @@ export const register: Register = (on: On, options: PluginOptions) => {
       const deadlineAt = Date.now() + config.compactionTimeoutMs;
       let refusal = '';
       let refusedBecause = '';
-      for (const [attempt, plan] of prosePlans(configured, event.messages).entries()) {
-        if (attempt > 0) verbatimRefused = refusedBecause;
-        const planned = { ...config, ...plan };
+      const plans = compactionPlans(configured, event.messages);
+      // A plan that changes only the budgets asks Jev what the previous one
+      // asked: answer an identical request from the first reply.
+      const replies = new Map<string, Promise<{ status: number; ok: boolean; text: string }>>();
+      for (const [attempt, plan] of plans.entries()) {
+        if (attempt > 0) refused.push({ label: plans[attempt - 1]!.label, why: refusedBecause });
+        currentLabel = plan.label;
+        const planned = { ...config, ...plan.options };
         const remaining = deadlineAt - Date.now();
         if (remaining <= 0) throw new CompactionTimeoutError(config.compactionTimeoutMs);
         let redacted = 0;
@@ -820,9 +858,19 @@ export const register: Register = (on: On, options: PluginOptions) => {
             compactSession(
               event.messages,
               planned,
-              async (url, init) => {
-                const response = await $.http.fetch(url, init);
-                return { status: response.status, ok: response.ok, text: response.text };
+              (url, init) => {
+                const key = `${url}\n${typeof init?.body === 'string' ? init.body : ''}`;
+                const cached = replies.get(key);
+                if (cached) return cached;
+                const reply = $.http.fetch(url, init).then((response) => ({
+                  status: response.status,
+                  ok: response.ok,
+                  text: response.text,
+                }));
+                replies.set(key, reply);
+                // A failed request is asked again by the next plan.
+                reply.catch(() => replies.delete(key));
+                return reply;
               },
               (count) => {
                 redacted += count;
@@ -879,7 +927,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         } else if (exceedsTarget(estimate, config.targetPercent)) {
           refusedBecause = `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target`;
         } else {
-          const retried = verbatimRefused ? `; verbatim prose was refused (${verbatimRefused})` : '';
+          const retried = refused.map((r) => `; ${r.label} was refused (${r.why})`).join('');
           await notify(
             $,
             trigger,
