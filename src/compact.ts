@@ -416,17 +416,29 @@ function ageCutResults(
   calls: readonly ToolCall[],
 ): { messages: Message[]; count: number } {
   const pinned = new Set(calls.filter((call) => call.pinned).map((call) => call.tool_use_id));
+  // A note this plugin wrote names its own call when it points at recall; a
+  // tool output that merely ends with such a line names another or none.
+  const ownNote = (id: string, text: string): RegExpExecArray | null => {
+    const match = CUT_RESULT.exec(text);
+    if (!match) return null;
+    const suffix = match[3]!;
+    return !suffix.includes('recall expand') || suffix.includes(`recall expand ["${id}"]`) ? match : null;
+  };
   const cutBefore = new Set<string>();
   for (const message of before) {
-    for (const result of message.toolResults ?? []) {
-      if (!pinned.has(result.tool_use_id) && CUT_RESULT.test(result.text)) cutBefore.add(result.tool_use_id);
+    const texts = [
+      ...(message.toolResults ?? []).map((result) => [result.tool_use_id, result.text] as const),
+      ...message.toolUses.map((tool) => [tool.tool_use_id, tool.text ?? ''] as const),
+    ];
+    for (const [id, text] of texts) {
+      if (!pinned.has(id) && ownNote(id, text)) cutBefore.add(id);
     }
   }
   if (cutBefore.size === 0) return { messages: after, count: 0 };
   const aged = new Set<string>();
   const age = (id: string, text: string): string => {
     if (!cutBefore.has(id)) return text;
-    const match = CUT_RESULT.exec(text);
+    const match = ownNote(id, text);
     if (!match || match[1] === '') return text;
     aged.add(id);
     return `[${PLUGIN_ID} truncated ${Number(match[2]) + match[1]!.length} chars of this tool result${match[3]}]`;

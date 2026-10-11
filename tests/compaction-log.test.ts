@@ -248,11 +248,15 @@ describe('compaction log file', () => {
       Object.assign(async () => 'went on', { error, called });
     const event = { trigger: 'auto', messages: [] };
     expect(await catches['session.compact']!($, event, next({ kind: 'timeout' }, false))).toBe('went on');
-    expect(await catches['session.compact']!($, event, next({ kind: 'refused', message: 'bad shape' }, true))).toBe('went on');
+    expect(await catches['session.compact']!($, event, next({ kind: 'throw', message: 'bad shape' }, true))).toBe('went on');
     expect(await catches['session.compact']!($, event, next({ kind: 're-entry' }, false))).toBe('went on');
     expect(linesOf(files)).toEqual([
       expect.stringMatching(/Z auto failed in Claude Code \(over its time budget\); built-in summary instead$/),
       expect.stringMatching(/Z auto failed in Claude Code \(bad shape\); after falling back$/),
     ]);
+    // A typed /compact may not fall back by default: nothing runs instead.
+    const typed = await catches['session.compact']!($, { trigger: 'manual', messages: [] }, next({ kind: 'timeout' }, false));
+    expect(typed).toEqual({ skip: expect.stringMatching(/the compaction failed/) });
+    expect(linesOf(files).at(-1)).toMatch(/Z manual failed in Claude Code \(over its time budget\); not compacted$/);
   });
 });

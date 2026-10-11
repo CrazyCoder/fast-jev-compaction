@@ -9,7 +9,7 @@ import type {
 } from 'claude-code';
 
 import { PLUGIN_ID } from '../src/brand.js';
-import { compact, reductionRatio, resolveOptions } from '../src/compact.js';
+import { compact, CompactionInterrupted, reductionRatio, resolveOptions } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
 import { DEFAULT_MODEL, JevTransportError } from '../src/request.js';
@@ -386,17 +386,26 @@ export async function withCompactionDeadline<T>(
   work: () => Promise<T>,
   timeoutMs: number,
   sleep: (ms: number, options: { signal: AbortSignal }) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<T> {
   const timer = new AbortController();
   const deadline = sleep(timeoutMs, { signal: timer.signal }).then(() => {
     throw new CompactionTimeoutError(timeoutMs);
   });
+  // Whoever asked moving on ends the wait at once, even on a request in flight.
+  let onAbort = (): void => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new CompactionInterrupted());
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
   try {
     // Race observes late rejections too. A late response cannot install a
     // second compaction after the deadline has already settled this round.
-    return await Promise.race([Promise.resolve().then(work), deadline]);
+    return await Promise.race([Promise.resolve().then(work), deadline, aborted]);
   } finally {
     timer.abort();
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -745,12 +754,24 @@ export const register: Register = (on: On, options: PluginOptions) => {
       await appendCompactionLog($, `${trigger} interrupted: Claude Code moved on; nothing handed back`);
       return { skip: 'interrupted' };
     };
+    // The guards keep automatic compactions from running back to back; a
+    // /compact the person typed is applied whenever it frees anything.
+    const installBest = async (why: string, chosen: NonNullable<typeof best>) => {
+      await notify(
+        $,
+        trigger,
+        `kept the smallest result although ${why}, since /compact was typed (${chosen.detail})`,
+        `compacted, ${percent(chosen.ratio)} smaller`,
+      );
+      return { messages: chosen.messages };
+    };
     const giveUp = async (why: string) => {
       if (next.signal?.aborted) return interrupted();
       if (mayUseBuiltin(trigger, configured.builtinFallback)) {
         await notify($, trigger, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
         try {
-          return await next(event);
+          // The queued marker is not an instruction for the summarizer either.
+          return await next(queued ? { ...event, instructions: undefined } : event);
         } catch (error) {
           // The built-in summary failed: the reduction this hook already made
           // beats leaving the session over its limit.
@@ -813,6 +834,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
             ),
           remaining,
           (ms, options) => $.clock.sleep(ms, options),
+          next.signal,
         );
         if (next.signal?.aborted) return interrupted();
         debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
@@ -865,20 +887,15 @@ export const register: Register = (on: On, options: PluginOptions) => {
         }
         refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }
-      // The guards keep automatic compactions from running back to back; a
-      // /compact the person typed is applied whenever it frees anything.
-      if (typed && best) {
-        await notify(
-          $,
-          trigger,
-          `kept the smallest result although ${afterVerbatim(refusedBecause)}, since /compact was typed (${best.detail})`,
-          `compacted, ${percent(best.ratio)} smaller`,
-        );
-        return { messages: best.messages };
-      }
+      if (typed && best) return installBest(afterVerbatim(refusedBecause), best);
       return giveUp(afterVerbatim(refusal));
     } catch (error) {
       if (next.signal?.aborted) return interrupted();
+      // A later plan failed (Jev, the shared deadline); an earlier one's result
+      // still answers a typed /compact.
+      if (typed && best) {
+        return installBest(`a later attempt failed (${error instanceof Error ? error.message : String(error)})`, best);
+      }
       const why = afterVerbatim(error instanceof Error ? error.message : String(error));
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
         await notify($, trigger, `not compacted (${why})`, `not compacted (${toastReason(why)})`);
@@ -890,15 +907,18 @@ export const register: Register = (on: On, options: PluginOptions) => {
     // Claude Code refused what the hook returned, the hook threw, or it ran
     // over its time budget: log it, then let Claude Code go on without it.
     const { kind, message } = next.error;
+    const queued = event.trigger === 'manual' && event.instructions?.trim() === QUEUED_COMPACT_ARGS;
+    const trigger = queued ? 'auto' : event.trigger;
+    // Where the built-in summary is not allowed, nothing runs in its place.
+    const builtin = next.called || mayUseBuiltin(trigger, configured.builtinFallback);
     // Raised beneath its own call, the hook's $ calls reject: nothing to log.
     if (kind !== 're-entry') {
       const why = kind === 'timeout' ? 'over its time budget' : (message ?? 'it threw');
-      await appendCompactionLog(
-        $,
-        `${event.trigger} failed in Claude Code (${why}); ${next.called ? 'after falling back' : 'built-in summary instead'}`,
-      );
+      const then = next.called ? 'after falling back' : builtin ? 'built-in summary instead' : 'not compacted';
+      await appendCompactionLog($, `${trigger} failed in Claude Code (${why}); ${then}`);
     }
-    return next(event);
+    if (!builtin) return { skip: `${PLUGIN_ID}: the compaction failed; conversation left as it is` };
+    return next(queued ? { ...event, instructions: undefined } : event);
   });
 
   on('turn.complete', async ($, event: TurnCompleteInput, next) => {

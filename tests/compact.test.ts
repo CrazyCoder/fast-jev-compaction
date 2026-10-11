@@ -602,7 +602,7 @@ describe('compact', () => {
 
   it('ages results an earlier compaction cut: their head goes, their note stays', async () => {
     const messages = transcript();
-    const cutBefore = `${'h'.repeat(300)}\n[jetcompact truncated 900 chars of this tool result; full text: recall expand ["t1"]]`;
+    const cutBefore = `${'h'.repeat(300)}\n[jetcompact truncated 900 chars of this tool result; full text: recall expand ["tool-1"]]`;
     messages[2]!.toolResults![0]!.text = cutBefore;
     messages[1]!.toolUses[0]!.text = cutBefore;
     const keepAll = fakeJev(() => 0.9);
@@ -611,10 +611,17 @@ describe('compact', () => {
     expect(plain.stats.resultsAged).toBe(0);
 
     const aged = await compact(messages, keepAll, { keepMode: 'threshold', preserveRecentMessages: 1, ageCutResults: true });
-    const note = '[jetcompact truncated 1200 chars of this tool result; full text: recall expand ["t1"]]';
+    const note = '[jetcompact truncated 1200 chars of this tool result; full text: recall expand ["tool-1"]]';
     expect(aged.messages[2]!.toolResults![0]!.text).toBe(note);
     expect(aged.messages[1]!.toolUses[0]!.text).toBe(note);
     expect(aged.stats.resultsAged).toBe(1);
+    // Output that only ends with a note naming another call is not a cut; nor is a pinned result.
+    const quoted = transcript();
+    quoted[2]!.toolResults![0]!.text = cutBefore.replace('["tool-1"]', '["other"]');
+    const notCut = await compact(quoted, keepAll, { keepMode: 'threshold', preserveRecentMessages: 1, ageCutResults: true });
+    expect(notCut.stats.resultsAged).toBe(0);
+    const pinned = await compact(messages, keepAll, { keepMode: 'threshold', preserveRecentMessages: 99, ageCutResults: true });
+    expect(pinned.stats.resultsAged).toBe(0);
     // A result cut by this compaction keeps its head until the next one.
     const fresh = await compact(transcript(), fakeJev(() => 0.1), { keepMode: 'threshold', preserveRecentMessages: 1, ageCutResults: true });
     expect(fresh.stats.resultsAged).toBe(0);

@@ -560,12 +560,18 @@ async function compactWith(
   trigger: string,
   fetch: ReturnType<typeof jevFetch>,
   options: Record<string, unknown> = {},
-  more: { instructions?: string; signal?: AbortSignal; builtin?: () => Promise<unknown> } = {},
+  more: {
+    instructions?: string;
+    signal?: AbortSignal;
+    builtin?: () => Promise<unknown>;
+    onNext?: (event: unknown) => void;
+  } = {},
 ) {
   const { $, notices, sinks, toasts } = host(fetch);
   let delegated = false;
   const next = Object.assign(
-    async () => {
+    async (event: unknown) => {
+      more.onNext?.(event);
       delegated = true;
       return more.builtin ? more.builtin() : CORE;
     },
@@ -607,10 +613,13 @@ describe('who asked for the compaction', () => {
       asked.push(name);
       return 0.9;
     });
+    const handed: unknown[] = [];
     const { out, delegated, notices } = await compactWith('manual', fetch, { keepMode: 'threshold' }, {
       instructions: QUEUED_COMPACT_ARGS,
+      onNext: (e) => handed.push(e),
     });
     expect(delegated).toBe(true);
+    expect((handed[0] as { instructions?: string }).instructions).toBeUndefined();
     expect(out).toBe(CORE);
     expect(notices.at(-1)).toMatch(/^fallback to built-in summary/);
     expect(asked.length).toBeGreaterThan(0);
@@ -635,6 +644,17 @@ describe('when Claude Code moves on', () => {
       return { status: 503, ok: false, text: 'busy' };
     };
     const { out, delegated } = await compactWith('auto', fetch, {}, { signal: controller.signal });
+    expect(out).toEqual({ skip: 'interrupted' });
+    expect(delegated).toBe(false);
+  });
+
+  it('stops waiting on a request in flight when the signal aborts', async () => {
+    const controller = new AbortController();
+    const hung = () => {
+      setTimeout(() => controller.abort(), 5);
+      return new Promise<never>(() => {});
+    };
+    const { out, delegated } = await compactWith('auto', hung as never, {}, { signal: controller.signal });
     expect(out).toEqual({ skip: 'interrupted' });
     expect(delegated).toBe(false);
   });
@@ -979,6 +999,22 @@ describe('old prose through the hook', () => {
   it('does not retry an explicit oldProse: keep', async () => {
     const { out } = await compactPlain({ oldProse: 'keep' }, turns(12));
     expect(out.skip).toMatch(/below 25% minimum/);
+  });
+
+  it('applies an earlier attempt\'s result when a later one fails on a typed /compact', async () => {
+    const { $, notices } = host(jevFetch(() => 0.1));
+    let calls = 0;
+    const ok = jevFetch(() => 0.1);
+    $.http.fetch = (async (url: string, init: unknown) => {
+      calls += 1;
+      return calls === 1 ? ok(url, init as never) : { status: 500, ok: false, text: 'down' };
+    }) as never;
+    const out = (await hooks({ preserveRecentMessages: 2, recentTurns: 3, keepMode: 'threshold', minReductionRatio: 0.99 })[
+      'session.compact'
+    ]!($, { trigger: 'manual', messages: shrinkable() }, async () => ({ messages: [] }))) as { messages?: unknown[]; skip?: string };
+    expect(out.skip).toBeUndefined();
+    expect(out.messages).toBeDefined();
+    expect(notices.at(-1)).toMatch(/kept the smallest result although a later attempt failed/);
   });
 
   it('applies a typed /compact the size guards refuse, with its smallest result', async () => {
