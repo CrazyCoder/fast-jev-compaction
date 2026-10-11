@@ -44,8 +44,8 @@ All notable changes to this fork are documented here. The format follows
   model's whole window. With a smaller compaction window, or on a 1M model, the
   plugin asked for compaction late and the size target never applied.
 - The estimate of the context after a compaction keeps the system prompt, tools
-  and memory files as they are; it shrank them with the messages, so it came
-  out low.
+  and memory files as they are; it shrank them with the messages, so it came out
+  low.
 - A stubbed call's input is cut on a code point boundary, so an emoji is never
   split. (k-metehan 11bd2be)
 

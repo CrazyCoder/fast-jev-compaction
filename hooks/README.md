@@ -180,14 +180,15 @@ The `turn.complete` hook requests compaction when the context reaches
 guard. That window is the summary breakdown's `rawMaxTokens`
 (`$.session.usage({ breakdown: 'summary' })`, estimated locally, no request):
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or a setting when one is set, else the
-model's. `context.percent` alone counts against the model's whole window, so
-on a 1M model, or with a smaller compaction window, it would trigger late. When that request is skipped, the
-hook waits until the context has grown by another 10 percentage points, or
-dropped below `compactAtPercent` again, before it asks again. Headless sessions
-(the desktop app's Code tab, `claude -p`) refuse `$.session.compact`, so there
-the hook queues `/compact` for when the turn is over and applies the same wait,
-since a queued compaction's outcome does not come back to it. Toasts are not
-shown in those sessions; the outcome is in the compaction log.
+model's. `context.percent` alone counts against the model's whole window, so on
+a 1M model, or with a smaller compaction window, it would trigger late. When
+that request is skipped, the hook waits until the context has grown by another
+10 percentage points, or dropped below `compactAtPercent` again, before it asks
+again. Headless sessions (the desktop app's Code tab, `claude -p`) refuse
+`$.session.compact`, so there the hook queues `/compact` for when the turn is
+over and applies the same wait, since a queued compaction's outcome does not
+come back to it. Toasts are not shown in those sessions; the outcome is in the
+compaction log.
 
 `targetPercent` guards against a post-compaction floor that rises each time
 while old prose is kept verbatim. The hook estimates the context percentage
