@@ -23,12 +23,14 @@ full lineage is under [Features and credits](#features-and-credits).
 
 I used [pi-vcc](https://github.com/sting8k/pi-vcc) in Pi for some time and liked
 how fast its compaction is compared to the stock summary. Speed was the main
-factor for me. Then Jev was released, and I saw
-[Theo's post](https://x.com/theo/status/2100762304862384257) and the debate over
-it. Then I found fast-jev-compaction and decided to try it. It had many issues,
-and the author stopped merging fixes, so I forked it to fix them. On the way the
-project turned into an experiment, with [evals](docs/evals.md) against Claude
-Code's built-in summary. Try it, and send feedback and suggestions as issues.
+factor for me. When Jev came out, fast-jev-compaction brought it to Claude Code
+as a mod. The next day
+[Theo posted about it](https://x.com/theo/status/2100762304862384257), and his
+post started a debate. I wanted the speed, so I tried it anyway. It had many
+issues, and the author stopped merging fixes, so I forked it to fix them. On the
+way the project turned into an experiment, with [evals](docs/evals.md) against
+Claude Code's built-in summary. Try it, and send feedback and suggestions as
+issues.
 
 ### Questions from Theo's post
 
@@ -40,7 +42,7 @@ same questions, so here is how JetCompact answers them.
 | Compaction should be rare, not a constant filter. | It runs only when Claude Code would compact anyway: at `compactAtPercent` of the compaction window, or on `/compact`. |
 | The decision model decides per tool call without seeing the output, so the agent loses what it needs and loops. | A cut result keeps its first few hundred characters, the transcript is never deleted, and the `recall` tool returns the full output by its id. After each compaction, the model gets a note that says what was cut and tells it to use `recall` before it runs a tool again. In the evals the model re-read 0.8 files per run after a compaction, against 2.1 with the built-in summary. |
 | The output is "deleted permanently", so the agent must re-run the tool. | That is the original's README. JetCompact deletes nothing from the transcript, and `recall` reads it back. |
-| Reasoning traces are lost. | Every compaction loses them: the built-in summary replaces the whole history, reasoning included. JetCompact keeps the prompts, the replies and the kept tool output word for word. |
+| Reasoning traces are lost. | Every compaction loses them: the built-in summary replaces the whole history, reasoning included. JetCompact keeps the prompts, the replies and the kept tool output word for word, but no reasoning blocks either. |
 | Models are trained on their own compaction summary. | Not measured directly. In the evals every arm finished every task, so these tasks do not separate the two on success. |
 | Editing history invalidates the prompt cache. | Every compaction rewrites the cache, the built-in one too. The trade-off of JetCompact is that it keeps more context, so later turns read more from the cache and the next compaction comes sooner. `targetPercent` caps what a compaction keeps. In the evals, sessions that compacted once cost 13% less, and sessions that compacted several times in a small window cost the same. |
 
