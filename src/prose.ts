@@ -3,7 +3,7 @@ import { isHostText, stripHostText } from './host-text.js';
 import { sliceSurrogateSafe, truncate } from './state.js';
 import type { Message, OldProseMode } from './types.js';
 
-export const DEFAULT_RECENT_TURNS = 8;
+export const DEFAULT_RECENT_TURNS = 4;
 
 /** Characters kept of the session's first prompt, the task statement. */
 const FIRST_PROMPT_CHARS = 2000;

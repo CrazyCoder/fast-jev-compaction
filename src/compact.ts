@@ -33,8 +33,8 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   instructions: '',
   keepMode: 'rank',
   keepThreshold: 0.5,
-  keepResultTokens: 12_000,
-  keepCallTokens: 4_000,
+  keepResultTokens: 6_000,
+  keepCallTokens: 2_000,
   preserveRecentMessages: 6,
   maxStateTokens: 25_000,
   maxRequestTokens: 30_000,
@@ -511,22 +511,6 @@ export function ownCutNote(id: string, text: string): RegExpExecArray | null {
   if (!match) return null;
   const suffix = match[3]!;
   return !suffix.includes('recall expand') || suffix.includes(`recall expand ["${id}"]`) ? match : null;
-}
-
-/**
- * Whether result `id` was cut by an earlier compaction: its note at the end,
- * or followed by hidden content that compaction folded in after it (a blank
- * line, then the piece). A note in the recall form must name `id`.
- */
-export function wasCutBefore(id: string, text: string): boolean {
-  if (ownCutNote(id, text) !== null) return true;
-  const rest = [restOf(id, true, ''), RERUN].map(escapeRegExp).join('|');
-  const note = new RegExp(`\\[${PLUGIN_ID} truncated \\d+ chars of this tool result(?: \\(error\\))?(?:${rest})\\]\\n\\n`);
-  return note.test(text);
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

@@ -111,9 +111,9 @@ export interface CompactOptions {
   keepMode?: KeepMode;
   /** Threshold mode: minimum keep probability for a call or result to stay. Default 0.5. */
   keepThreshold?: number;
-  /** Rank mode: estimated tokens of results kept verbatim. Default 12000. */
+  /** Rank mode: estimated tokens of results kept verbatim. Default 6000. */
   keepResultTokens?: number;
-  /** Rank mode: estimated tokens of inputs (plus truncated heads) kept when the result is dropped. Default 4000. */
+  /** Rank mode: estimated tokens of inputs (plus truncated heads) kept when the result is dropped. Default 2000. */
   keepCallTokens?: number;
   /** Newest messages never touched (the first message is always kept). Default 6. */
   preserveRecentMessages?: number;
@@ -157,7 +157,7 @@ export interface CompactOptions {
    * compacted as usual. Default `keep`.
    */
   oldProse?: OldProseMode;
-  /** User turns kept outside `oldProse` condensing. Default 8. */
+  /** User turns kept outside `oldProse` condensing. Default 4. */
   recentTurns?: number;
   /**
    * A result an earlier compaction already cut to a head loses that head too:

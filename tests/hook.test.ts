@@ -818,17 +818,17 @@ describe('built-in summary fallback', () => {
     expect(delegated).toBe(false);
     expect(out).toEqual({
       skip: expect.stringMatching(
-        /^jetcompact: verbatim prose refused \(below 25% minimum\); harder cut: below 25% minimum: 0% reduction; .*; conversation left as it is$/,
+        /^jetcompact: digest refused \(below 25% minimum\); harder cut: below 25% minimum: 0% reduction; .*; conversation left as it is$/,
       ),
     });
-    expect(notices.at(-1)).toMatch(/^not compacted, no built-in summary \(verbatim prose refused \(below 25% minimum\); harder cut: below 25% minimum/);
+    expect(notices.at(-1)).toMatch(/^not compacted, no built-in summary \(digest refused \(below 25% minimum\); harder cut: below 25% minimum/);
   });
 
   it('hands an engine auto compaction that Jev cannot shrink to the built-in summary', async () => {
     const { out, delegated, notices } = await compactWith('auto', jevFetch(() => 0.9));
     expect(delegated).toBe(true);
     expect(out).toBe(CORE);
-    expect(notices.at(-1)).toMatch(/^fallback to built-in summary \(verbatim prose refused \(below 25% minimum\); harder cut: below 25% minimum/);
+    expect(notices.at(-1)).toMatch(/^fallback to built-in summary \(digest refused \(below 25% minimum\); harder cut: below 25% minimum/);
   });
 
   it('skips on a Jev failure unless the engine itself is compacting', async () => {
@@ -959,17 +959,14 @@ describe('auto-compaction at compactAtPercent', () => {
 });
 
 describe('the harder cut', () => {
-  /**
-   * An automatic compaction of three results that just fit keepResultTokens
-   * (12000) together, so only half of it cuts anything; `earlier` comes first.
-   */
-  async function compactThree(earlier: SessionMessage[] = []) {
+  it('cuts with half the budgets when the first attempt keeps too much, and asks Jev once', async () => {
+    // Three results that just fit keepResultTokens (6000) together, so only
+    // half of it cuts anything.
     const bodies: string[] = [];
     const { $, notices } = host(jevFetch(() => 0.9, bodies));
     const messages = [
       message('user', 'Fix the parser.'),
-      ...earlier,
-      ...['a', 'b', 'c'].flatMap((id) => [call(id, 'Read', { file_path: `src/${id}.ts` }, ''), result(id, id.repeat(15_000))]),
+      ...['a', 'b', 'c'].flatMap((id) => [call(id, 'Read', { file_path: `src/${id}.ts` }, ''), result(id, id.repeat(7_500))]),
       message('assistant', 'Read them.'),
       message('user', 'next'),
     ];
@@ -978,48 +975,9 @@ describe('the harder cut', () => {
       { trigger: 'auto', messages },
       async () => ({ messages: [] }),
     )) as { messages?: unknown[] };
-    return { out, notice: notices.at(-1), bodies };
-  }
-
-  it('cuts with half the budgets when the first attempt keeps too much, and asks Jev once', async () => {
-    const { out, notice, bodies } = await compactThree();
     expect(out.messages).toBeDefined();
-    expect(notice).toMatch(/; verbatim prose was refused \(below 25% minimum\)$/);
+    expect(notices.at(-1)).toMatch(/; digest was refused \(below 25% minimum\)$/);
     expect(bodies).toHaveLength(1);
-  });
-
-  it('cuts that hard from the first attempt once an earlier compaction cut something', async () => {
-    const { out, notice } = await compactThree([
-      call('old', 'Read', { file_path: 'src/old.ts' }, ''),
-      result('old', `${'o'.repeat(300)}\n[jetcompact truncated 9000 chars of this tool result; full text: recall expand ["old"]]`),
-    ]);
-    expect(out.messages).toBeDefined();
-    expect(notice).not.toMatch(/was refused/);
-  });
-
-  it('sees an earlier cut whose result had hidden content folded in after its note', async () => {
-    const folded = '\n\n<system-reminder>A skill body folded back.</system-reminder>';
-    for (const note of [
-      '[jetcompact truncated 9000 chars of this tool result; full text: recall expand ["old"]]',
-      '[jetcompact truncated 9000 chars of this tool result (error); full text: recall expand ["old"]]',
-      '[jetcompact truncated 9000 chars of this tool result; re-run the tool if needed]',
-    ]) {
-      const { out, notice } = await compactThree([
-        call('old', 'Read', { file_path: 'src/old.ts' }, ''),
-        result('old', `${'o'.repeat(300)}\n${note}${folded}`),
-      ]);
-      expect(out.messages, note).toBeDefined();
-      expect(notice, note).not.toMatch(/was refused/);
-    }
-  });
-
-  it('is not set off by a tool output that quotes another call\'s cut note', async () => {
-    // A log read back, ending with a note this plugin wrote for call "x".
-    const { notice } = await compactThree([
-      call('log', 'Read', { file_path: 'compactions.log' }, ''),
-      result('log', `${'l'.repeat(300)}\n[jetcompact truncated 9000 chars of this tool result; full text: recall expand ["x"]]`),
-    ]);
-    expect(notice).toMatch(/; verbatim prose was refused \(below 25% minimum\)$/);
   });
 });
 
@@ -1110,17 +1068,16 @@ describe('old prose through the hook', () => {
     return { out, notices };
   }
 
-  it('keeps old prose verbatim by default while that frees enough', async () => {
+  it('digests old prose by default, also when verbatim prose would free enough', async () => {
     const { out } = await compactPlain({}, shrinkable());
     expect(out.skip).toBeUndefined();
-    expect(out.messages).toBeDefined();
-    expect(out.messages!.some((m) => digestMarker.test(m.text))).toBe(false);
+    expect(out.messages!.some((m) => digestMarker.test(m.text))).toBe(true);
   });
 
-  it('digests old prose by default when verbatim prose would be refused', async () => {
-    const { out, notices } = await run({ recentTurns: 3 });
-    expect(withoutCompactionNote(out.messages)[0]!.text).toMatch(digestMarker);
-    expect(notices.at(-1)).toMatch(/old prose digest: .*; verbatim prose was refused \(below 25% minimum/);
+  it('keeps old prose verbatim under oldProse: keep', async () => {
+    const { out } = await compactPlain({ oldProse: 'keep' }, shrinkable());
+    expect(out.messages).toBeDefined();
+    expect(out.messages!.some((m) => digestMarker.test(m.text))).toBe(false);
   });
 
   it('starts with the digest once the conversation holds one', async () => {
@@ -1143,7 +1100,7 @@ describe('old prose through the hook', () => {
     expect(await asked({})).toBe(await asked({ oldProse: 'keep' }));
   });
 
-  it('gives the digest only what is left of compactionTimeoutMs', async () => {
+  it('gives the harder cut only what is left of compactionTimeoutMs', async () => {
     const waits: number[] = [];
     const { $ } = host(jevFetch(() => 0.1));
     (($ as unknown) as { clock: unknown }).clock = {
@@ -1155,7 +1112,7 @@ describe('old prose through the hook', () => {
     let now = 1_000_000;
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 2_000));
     try {
-      await hooks({ preserveRecentMessages: 2, recentTurns: 3, compactionTimeoutMs: 15_000 })['session.compact']!(
+      await hooks({ preserveRecentMessages: 2, recentTurns: 3, compactionTimeoutMs: 15_000, minReductionRatio: 0.99 })['session.compact']!(
         $,
         { trigger: 'manual', messages: turns(12) },
         async () => ({}),
@@ -1168,18 +1125,9 @@ describe('old prose through the hook', () => {
     expect(waits[1]).toBeLessThan(waits[0]!);
   });
 
-  it('names the verbatim refusal when the digest is refused too', async () => {
+  it('names the digest refusal when the harder cut is refused too', async () => {
     const { out } = await compactPlain({ minReductionRatio: 0.99 }, turns(12));
-    expect(out.skip).toMatch(
-      /verbatim prose refused \(below 99% minimum\); digest refused \(below 99% minimum\); harder cut: below 99% minimum/,
-    );
-  });
-
-  it('starts verbatim after a summary, which is not a digest', async () => {
-    const summary = '[jetcompact summary of 5 earlier turns]\nWe set up the build.';
-    const earlier = [message('user', summary), message('assistant', 'Understood. Continuing from the earlier-turns summary above.')];
-    const { out } = await compactPlain({}, [...earlier, ...shrinkable()]);
-    expect(withoutCompactionNote(out.messages!)[0]!.text).toBe(summary);
+    expect(out.skip).toMatch(/digest refused \(below 99% minimum\); harder cut: below 99% minimum/);
   });
 
   it('does not retry an explicit oldProse: keep', async () => {
@@ -1189,15 +1137,24 @@ describe('old prose through the hook', () => {
 
   it('applies an earlier attempt\'s result when a later one fails on a typed /compact', async () => {
     const { $, notices } = host(jevFetch(() => 0.1));
-    let calls = 0;
+    // The first attempt's answer comes back after the whole budget: the next
+    // attempt has no time left and throws.
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const ok = jevFetch(() => 0.1);
     $.http.fetch = (async (url: string, init: unknown) => {
-      calls += 1;
-      return calls === 1 ? ok(url, init as never) : { status: 500, ok: false, text: 'down' };
+      const reply = await ok(url, init as never);
+      now += 60_000;
+      return reply;
     }) as never;
-    const out = (await hooks({ preserveRecentMessages: 2, recentTurns: 3, keepMode: 'threshold', minReductionRatio: 0.99 })[
-      'session.compact'
-    ]!($, { trigger: 'manual', messages: shrinkable() }, async () => ({ messages: [] }))) as { messages?: unknown[]; skip?: string };
+    let out: { messages?: unknown[]; skip?: string };
+    try {
+      out = (await hooks({ preserveRecentMessages: 2, recentTurns: 3, keepMode: 'threshold', minReductionRatio: 0.99 })[
+        'session.compact'
+      ]!($, { trigger: 'manual', messages: shrinkable() }, async () => ({ messages: [] }))) as typeof out;
+    } finally {
+      clock.mockRestore();
+    }
     expect(out.skip).toBeUndefined();
     expect(out.messages).toBeDefined();
     expect(notices.at(-1)).toMatch(/kept the smallest result although a later attempt failed/);

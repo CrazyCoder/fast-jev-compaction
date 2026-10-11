@@ -557,7 +557,7 @@ describe('rank decisions', () => {
     expect(resolveOptions({ keepMode: 'threshold' }).keepMode).toBe('threshold');
     expect(resolveOptions({ keepResultTokens: -5, keepCallTokens: Number.NaN })).toMatchObject({
       keepResultTokens: 0,
-      keepCallTokens: 4_000,
+      keepCallTokens: 2_000,
     });
     const output = await compact(transcript(), fakeJev(() => 0.2), { preserveRecentMessages: 1 });
     expect(output.stats.kept + output.stats.resultsDropped).toBeGreaterThan(0);

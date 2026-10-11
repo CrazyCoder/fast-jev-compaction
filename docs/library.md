@@ -71,8 +71,8 @@ engine handle lose; see [hooks/README.md](../hooks/README.md).
 | `goal` | last 3 user prompts | Ongoing task description included in the state |
 | `keepMode` | `rank` | `rank` keeps the best-scored calls within the token budgets below; `threshold` compares against `keepThreshold` |
 | `keepThreshold` | `0.5` | Threshold mode: minimum keep probability for a call or result to stay |
-| `keepResultTokens` | `12000` | Rank mode: estimated tokens of results kept verbatim |
-| `keepCallTokens` | `4000` | Rank mode: estimated tokens of inputs plus truncated heads kept when the result is dropped |
+| `keepResultTokens` | `6000` | Rank mode: estimated tokens of results kept verbatim |
+| `keepCallTokens` | `2000` | Rank mode: estimated tokens of inputs plus truncated heads kept when the result is dropped |
 | `preserveRecentMessages` | `6` | Newest messages never touched (the first is always kept) |
 | `maxStateTokens` | `25000` | Estimated token ceiling for the state |
 | `maxRequestTokens` | `30000` | Estimated ceiling for state plus one batch of questions |
@@ -84,7 +84,7 @@ engine handle lose; see [hooks/README.md](../hooks/README.md).
 | `trimHostText` | `true` | Cut host-generated blocks (`<system-reminder>`, `<task-notification>`, command echoes, hook output; never user prose) outside the pinned messages to a head plus a marker |
 | `hostTextHeadChars` | `200` | Characters of a trimmed host block retained before its marker |
 | `oldProse` | `keep` | `digest` replaces everything before the last `recentTurns` user turns with a deterministic digest (first prompt, per-turn prompt head and final reply head, tool names, referenced paths and ids); `summarize` with a model-written summary (plugin: `proseModel`, falls back to the digest; the library needs a `summarize` callback in `compact`'s fourth argument). An earlier digest or summary is folded, not chained |
-| `recentTurns` | `8` | User turns kept outside `oldProse` condensing |
+| `recentTurns` | `4` | User turns kept outside `oldProse` condensing |
 | `taskResultHeadChars` | `4000` | Characters of a `<task-notification>`'s `<result>` (a subagent's final report) retained; its `task-id`, `status`, `summary`, `output-file` and `tool-use-id` always stay whole; `0` trims it like any host block |
 | `ageCutResults` | `false` | A result an earlier compaction cut to a head loses the head at this compaction; only its cut note stays (recall returns the full text). Pinned results are never aged. `stats.resultsAged` counts them |
 | `questionCriteria` | `false` | Each question gets `true`/`false` criteria for what a call or result worth keeping looks like (changes made, errors still being diagnosed) and what is safe to cut (superseded reads, passing runs) |
@@ -96,13 +96,13 @@ retry or wait starts, and `compact` throws `CompactionInterrupted`.
 Plugin-only options (set as plugin options, see
 [`hooks/README.md`](../hooks/README.md)): `compactAtPercent` (60),
 `minReductionRatio` (0.25), `compactionTimeoutMs` (15000), `builtinFallback`
-(`auto`), `targetPercent` (45: above this estimated post-compaction context
-percentage, the Jev result is given up for the built-in summary on automatic
-compactions, or skipped otherwise), `envFile`. With `oldProse` unset, the plugin
-first retries a refused result with `oldProse: 'digest'`, and then, whatever
-`oldProse` is, with a harder cut (half the keep budgets,
-`truncateHeadChars: 100`); see
-[Adaptive prose digest](../README.md#adaptive-prose-digest).
+(`auto`), `targetPercent` (45: the estimated post-compaction context percentage
+the plugin aims under), `envFile`. With `oldProse` unset, the plugin digests old
+prose (`oldProse: 'digest'`; the library's own default stays `keep`). A refused
+result is tried once more as a harder cut (half the keep budgets,
+`truncateHeadChars: 100`), and an automatic compaction that still misses
+`targetPercent` applies its best result when that frees `minReductionRatio`; see
+[How hard a compaction cuts](../README.md#how-hard-a-compaction-cuts).
 
 `result.stats` reports message and character counts before and after, the
 per-reason decision counts, the state size in estimated tokens, which fitting

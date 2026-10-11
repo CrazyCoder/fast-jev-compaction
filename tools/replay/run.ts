@@ -25,6 +25,7 @@ const { values } = parseArgs({
     'max-points': { type: 'string', default: String(DEFAULT_REPLAY_CONFIG.maxPointsPerSegment) },
     window: { type: 'string', default: String(DEFAULT_REPLAY_CONFIG.windowTurns) },
     out: { type: 'string' },
+    options: { type: 'string' },
     'allow-network': { type: 'boolean', default: false },
   },
 });
@@ -83,6 +84,7 @@ for (const asker of askers) {
           minGrowthTokens: Number(values['min-growth']),
           maxPointsPerSegment: Number(values['max-points']),
           windowTurns: Number(values.window),
+          options: values.options ? (JSON.parse(values.options) as ReplayConfig['options']) : undefined,
         },
       });
     }

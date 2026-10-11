@@ -61,8 +61,8 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 | `model` | `jev-latest` (`gpt-6-luna` with `openai`) |
 | `keepMode` | `rank` |
 | `keepThreshold` | `0.5` (threshold mode only) |
-| `keepResultTokens` | `12000` |
-| `keepCallTokens` | `4000` |
+| `keepResultTokens` | `6000` |
+| `keepCallTokens` | `2000` |
 | `preserveRecentMessages` | `6` |
 | `compactAtPercent` | `60` |
 | `minReductionRatio` | `0.25` |
@@ -72,14 +72,14 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 | `maxStateTokens` | `25000` |
 | `maxRequestTokens` | `30000` |
 | `maxConcurrentRequests` | `4` |
-| `truncateHeadChars` | `300`, `100` once old prose is digested |
+| `truncateHeadChars` | `300`, `100` in the harder cut |
 | `dropCalls` | `false` |
 | `ageCutResults` | `false` |
 | `questionCriteria` | `false` |
 | `trimHostText` | `true` |
 | `hostTextHeadChars` | `200` |
-| `oldProse` | unset: `keep`, then `digest` (`summarize`) |
-| `recentTurns` | `8` |
+| `oldProse` | unset: `digest` (`keep`, `summarize`) |
+| `recentTurns` | `4` |
 | `proseModel` | `haiku` (`summarize` only) |
 | `taskResultHeadChars` | `4000` |
 | `baseUrl` | the provider's endpoint |
@@ -191,22 +191,22 @@ over and applies the same wait, since a queued compaction's outcome does not
 come back to it. Toasts are not shown in those sessions; the outcome is in the
 compaction log.
 
-`targetPercent` guards against a post-compaction floor that rises each time
-while old prose is kept verbatim. The hook estimates the context percentage
-after compaction, of the same window: the share that is not messages (system
-prompt, tools, memory files) stays, and the messages shrink by chars after /
-chars before.
+`targetPercent` is the context a compaction aims under. The hook estimates the
+context percentage after compaction, of the same window: the share that is not
+messages (system prompt, tools, memory files) stays, and the messages shrink by
+chars after / chars before.
 
-With `oldProse` unset, a result that falls below `minReductionRatio` or above
-`targetPercent` is computed again with old prose digested and cut results kept
-to `truncateHeadChars` (100 unless set), when the history has turns older than
-`recentTurns`. Both passes share one `compactionTimeoutMs`. A conversation that
-already holds a digest starts with it. When the digest is refused too, or
-`oldProse` is set, the result is given up: built-in summary on automatic
-compactions, skip otherwise. The outcome line, and the reason of a refusal or
-timeout in the second pass, say that verbatim prose was refused first. What the
-digest keeps, its trade-offs and the options that control it:
-[Adaptive prose digest](../README.md#adaptive-prose-digest).
+With `oldProse` unset, every compaction digests prose older than `recentTurns`
+user turns. A result that falls below `minReductionRatio` or above
+`targetPercent` is computed again as a harder cut: half the keep budgets, cut
+results kept to `truncateHeadChars` (100 unless set). Both passes share one
+`compactionTimeoutMs`, and the second asks Jev nothing new. When the harder cut
+still misses `targetPercent` but frees `minReductionRatio`, the best result is
+applied, automatic compactions included. When nothing frees that much, the
+result is given up: built-in summary on automatic compactions, skip otherwise.
+The outcome line, and the reason of a refusal or timeout in the second pass, say
+that the first pass was refused. Why these defaults and the options that change
+them: [How hard a compaction cuts](../README.md#how-hard-a-compaction-cuts).
 
 The hook waits at most `compactionTimeoutMs` for the Jev round, across all
 request batches. On a timeout, a plugin-triggered compaction returns a skip

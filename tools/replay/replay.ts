@@ -26,6 +26,8 @@ export interface ReplayConfig {
   minGrowthTokens: number;
   maxPointsPerSegment: number;
   windowTurns: number;
+  /** More `compact()` options, such as keep budgets or `decider` (`--options`). */
+  options?: CompactOptions;
 }
 
 export const DEFAULT_REPLAY_CONFIG: ReplayConfig = {
@@ -116,7 +118,7 @@ export function historyTokens(messages: readonly Message[]): number {
 }
 
 function compactOptions(config: ReplayConfig): CompactOptions {
-  const options: CompactOptions & { trimHostText?: boolean } = { keepMode: config.policy };
+  const options: CompactOptions & { trimHostText?: boolean } = { keepMode: config.policy, ...config.options };
   if (config.trimHostText !== undefined) options.trimHostText = config.trimHostText;
   return options;
 }

@@ -3,6 +3,33 @@
 All notable changes to this fork are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0]
+
+### Changed
+
+- Compactions cut harder by default. Prose older than the last 4 user turns
+  (`recentTurns`, was 8) becomes a digest at every compaction, instead of only
+  when verbatim prose would be refused; `keepResultTokens` is 6000 (was 12000)
+  and `keepCallTokens` 2000 (was 4000). In a replay of 30 large real sessions, a
+  compaction kept 36% of the context instead of 70%, and the share of cut
+  results needed again later went from 2.2% to 3.1%; `recall` reads them back.
+  Set `oldProse: "keep"`, `recentTurns` and the budgets to keep more. Why these
+  values: README, "How hard a compaction cuts"; numbers in `docs/evals.md`.
+- `targetPercent` is a goal, not a reason to give up. An automatic compaction
+  that misses it after the harder cut, but frees `minReductionRatio`, applies
+  its own result; the built-in summary runs only when JetCompact cannot free
+  that much or the decision model fails. In 0.11.0, at a small compaction
+  window, most compactions went to the built-in summary and took about 25 s; now
+  they take under 2 s at the same cost.
+- The harder cut (half budgets, 100-character heads) is only the second attempt
+  of a compaction; it no longer applies to every compaction once the session
+  holds an earlier cut.
+
+### Added
+
+- `tools/replay` takes `--options <json>` to replay sessions with other
+  compaction options, such as the keep budgets or `decider: "algorithmic"`.
+
 ## [0.11.0]
 
 ### Added

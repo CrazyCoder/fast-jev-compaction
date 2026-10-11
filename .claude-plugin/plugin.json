@@ -1,6 +1,6 @@
 {
   "name": "jetcompact",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "JetCompact: verbatim Claude Code compaction guided by a fast decision model (Jev or OpenAI Decisions), with a recall tool that reads back what compaction cut and searches past sessions.",
   "license": "MIT",
   "userConfig": {
@@ -44,13 +44,13 @@
       "type": "number",
       "title": "Kept result tokens",
       "description": "Rank mode: estimated tokens of tool results kept verbatim, best-scored first.",
-      "default": 12000
+      "default": 6000
     },
     "keepCallTokens": {
       "type": "number",
       "title": "Kept call tokens",
       "description": "Rank mode: estimated tokens of tool inputs (with a truncated result head) kept for calls whose full result is dropped.",
-      "default": 4000
+      "default": 2000
     },
     "preserveRecentMessages": {
       "type": "number",
@@ -103,7 +103,7 @@
     "targetPercent": {
       "type": "number",
       "title": "Target context percentage",
-      "description": "Falls back to the built-in summary when the estimated context after compaction would still exceed this percentage of the window.",
+      "description": "Estimated context after compaction, as a percentage of the compaction window, that a compaction aims under: above it, the harder cut is tried. An automatic compaction that stays above it still applies its result when that frees minReductionRatio.",
       "default": 45
     },
     "maxStateTokens": {
@@ -150,13 +150,13 @@
     "oldProse": {
       "type": "string",
       "title": "Old prose",
-      "description": "What becomes of user and assistant prose older than the last `recentTurns` user turns: `keep` (verbatim), `digest` (deterministic extractive digest) or `summarize` (summary written by `proseModel`, falling back to the digest). Unset: verbatim while that frees enough; the digest once verbatim prose would leave the compaction refused, and while that digest stays in the conversation."
+      "description": "What becomes of user and assistant prose older than the last `recentTurns` user turns: `keep` (verbatim), `digest` (deterministic extractive digest) or `summarize` (summary written by `proseModel`, falling back to the digest). Unset: the digest, at every compaction."
     },
     "recentTurns": {
       "type": "number",
       "title": "Recent turns",
       "description": "User turns kept outside the `oldProse` digest or summary.",
-      "default": 8
+      "default": 4
     },
     "proseModel": {
       "type": "string",

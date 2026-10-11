@@ -15,7 +15,6 @@ import {
   DEFAULT_OPTIONS,
   reductionRatio,
   resolveOptions,
-  wasCutBefore,
 } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
@@ -30,7 +29,7 @@ import {
   recallCommand,
   recallRequest,
 } from '../src/recall/tool.ts';
-import { DEFAULT_RECENT_TURNS, parseCondensed, splitOldProse, type ProseSummarizer } from '../src/prose.js';
+import type { ProseSummarizer } from '../src/prose.js';
 import type {
   CompactOptions,
   CompactResult,
@@ -57,66 +56,42 @@ const HOOK_DEFAULTS = {
   proseModel: 'haiku',
 };
 
-/** Characters of a cut result's head once old prose is digested, unless `truncateHeadChars` is set. */
-const DIGEST_HEAD_CHARS = 100;
+/** Characters of a cut result's head in the harder cut, unless `truncateHeadChars` is set. */
+const HARDER_HEAD_CHARS = 100;
 
 export interface CompactionPlan {
-  /** How the plan is named in a refusal: `verbatim prose`, `digest`, `harder cut`. */
+  /** How the plan is named in a refusal: `digest`, `configured`, `harder cut`. */
   label: string;
   options: Partial<CompactOptions>;
 }
 
 /**
  * The settings each compaction tries in order, the first that clears the size
- * guards winning.
+ * guards winning. When none does, an automatic compaction still keeps the
+ * best result that frees `minReductionRatio`.
  *
- * Old prose: a set `oldProse` is used as it is. Unset, old prose stays
- * verbatim, which suits sessions that compact once or twice; when that would
- * be refused, or while the conversation holds a digest from an earlier
- * compaction, the old prose is digested and cut results keep shorter heads.
- * Replaying long sessions, verbatim prose let each compaction end higher than
- * the last until compaction was refused for good; the digest kept it bounded.
+ * Old prose: a set `oldProse` is used as it is. Unset, prose older than the
+ * last `recentTurns` user turns is digested at every compaction. In a replay
+ * of 30 large real sessions (docs/evals.md), that kept 36% of the context
+ * against 70% with the prose verbatim, for a small rise in cut results needed
+ * again later.
  *
- * Last, a harder cut: the keep budgets halve and heads shrink to 100
- * characters. In
- * the A/B evals a compaction soon after a light one often freed under 25% and
- * fell back to the built-in summary; this tries what is left first.
- *
- * Once the conversation holds a cut from an earlier compaction, every plan
- * cuts that hard. The first compaction stays light, which is where the evals
- * saw no re-reads after compacting; later ones keep less, so the next
- * compaction comes later and the cache is rewritten less often (docs/evals.md).
+ * Then a harder cut: the keep budgets halve and heads shrink to 100
+ * characters, tried before an automatic compaction falls back to the built-in
+ * summary.
  */
-export function compactionPlans(config: HookConfig, messages: readonly Message[]): CompactionPlan[] {
+export function compactionPlans(config: HookConfig): CompactionPlan[] {
   const half = (value: number | undefined, fallback: number) => Math.floor((value ?? fallback) / 2);
-  const canDigest = Boolean(splitOldProse(messages, config.recentTurns ?? DEFAULT_RECENT_TURNS));
-  const hasDigest = messages.some((message) => parseCondensed(message)?.kind === 'digest');
-  const harderOptions = {
+  const first: CompactionPlan = config.oldProse
+    ? { label: 'configured', options: {} }
+    : { label: 'digest', options: { oldProse: 'digest' } };
+  const harder = {
+    ...first.options,
     keepResultTokens: half(config.keepResultTokens, DEFAULT_OPTIONS.keepResultTokens),
     keepCallTokens: half(config.keepCallTokens, DEFAULT_OPTIONS.keepCallTokens),
-    truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
+    truncateHeadChars: config.truncateHeadChars ?? HARDER_HEAD_CHARS,
   };
-  const prose: CompactionPlan[] = config.oldProse
-    ? [{ label: 'configured', options: {} }]
-    : hasDigest
-      ? [{ label: 'digest', options: { oldProse: 'digest', truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS } }]
-      : [
-          { label: 'verbatim prose', options: { oldProse: 'keep' } },
-          ...(canDigest
-            ? [{ label: 'digest', options: { oldProse: 'digest' as const, truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS } }]
-            : []),
-        ];
-  if (compactedBefore(messages)) {
-    return prose.map((plan) => ({ label: plan.label, options: { ...plan.options, ...harderOptions } }));
-  }
-  return [...prose, { label: 'harder cut', options: { ...prose.at(-1)!.options, ...harderOptions } }];
-}
-
-/** Whether an earlier compaction cut a result in `messages`. */
-function compactedBefore(messages: readonly Message[]): boolean {
-  return messages.some((message) =>
-    (message.toolResults ?? []).some((result) => wasCutBefore(result.tool_use_id, result.text)),
-  );
+  return [first, { label: 'harder cut', options: harder }];
 }
 
 /**
@@ -889,7 +864,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
     // Why earlier plans were refused, once a later one is being tried.
     const refused: { label: string; why: string }[] = [];
     let currentLabel = '';
-    const afterVerbatim = (why: string) =>
+    const withRefusals = (why: string) =>
       refused.length > 0
         ? `${refused.map((r) => `${r.label} refused (${r.why})`).join('; ')}; ${currentLabel}: ${why}`
         : why;
@@ -906,11 +881,11 @@ export const register: Register = (on: On, options: PluginOptions) => {
       } catch {
         fillBefore = {};
       }
-      // A retry with the digest shares the one compactionTimeoutMs budget.
+      // The harder cut shares the one compactionTimeoutMs budget.
       const deadlineAt = Date.now() + config.compactionTimeoutMs;
       let refusal = '';
       let refusedBecause = '';
-      const plans = compactionPlans(configured, event.messages);
+      const plans = compactionPlans(configured);
       // A plan that changes only the budgets asks Jev what the previous one
       // asked: answer an identical request from the first reply.
       const replies = new Map<string, Promise<{ status: number; ok: boolean; text: string }>>();
@@ -1011,9 +986,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
         refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }
       if (best && (typed || best.ratio >= config.minReductionRatio)) {
-        return installBest(afterVerbatim(refusedBecause), best);
+        return installBest(withRefusals(refusedBecause), best);
       }
-      return giveUp(afterVerbatim(refusal));
+      return giveUp(withRefusals(refusal));
     } catch (error) {
       if (next.signal?.aborted) return interrupted();
       // A later plan failed (Jev, the shared deadline); an earlier one's result
@@ -1021,7 +996,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
       if (typed && best) {
         return installBest(`a later attempt failed (${error instanceof Error ? error.message : String(error)})`, best);
       }
-      const why = afterVerbatim(error instanceof Error ? error.message : String(error));
+      const why = withRefusals(error instanceof Error ? error.message : String(error));
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
         await notify($, trigger, `not compacted (${why})`, `not compacted (${toastReason(why)})`);
         return { skip: `${PLUGIN_ID}: ${why}; conversation left unchanged` };
