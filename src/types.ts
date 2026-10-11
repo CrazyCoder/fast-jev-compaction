@@ -170,7 +170,16 @@ export interface CompactOptions {
    * result worth keeping looks like. Default false.
    */
   questionCriteria?: boolean;
+  /**
+   * Who scores the calls: `model` asks Jev (or the asker given); `algorithmic`
+   * asks nothing and scores by recency, errors and edits (see
+   * `algorithmicAnswers`), so a compaction needs no key and no network.
+   * Default `model`.
+   */
+  decider?: Decider;
 }
+
+export type Decider = 'model' | 'algorithmic';
 
 export interface ResolvedCompactOptions {
   goal: string;
@@ -193,6 +202,7 @@ export interface ResolvedCompactOptions {
   recentTurns: number;
   ageCutResults: boolean;
   questionCriteria: boolean;
+  decider: Decider;
 }
 
 export interface CompactResult {

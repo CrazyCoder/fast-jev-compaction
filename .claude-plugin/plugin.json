@@ -7,7 +7,7 @@
     "provider": {
       "type": "string",
       "title": "Decision provider",
-      "description": "jev (TypeSafe Jev, default) or openai (OpenAI Decisions API, gpt-6-luna; key from OPENAI_API_KEY).",
+      "description": "jev (TypeSafe Jev, default), openai (OpenAI Decisions API, gpt-6-luna; key from OPENAI_API_KEY), or algorithmic (no decision model: keeps the newest tool output, errors and edits within the same budgets; needs no key and makes no request).",
       "default": "jev"
     },
     "apiKey": {

@@ -636,6 +636,25 @@ describe('who asked for the compaction', () => {
   });
 });
 
+describe('provider: algorithmic', () => {
+  it('compacts with no key and no request', async () => {
+    let requests = 0;
+    const { $, notices } = host((async () => {
+      requests += 1;
+      return { status: 500, ok: false, text: 'no' };
+    }) as never);
+    $.env.get = async () => undefined;
+    const out = (await hooks({ provider: 'algorithmic', keepMode: 'threshold', preserveRecentMessages: 1 })['session.compact']!(
+      $,
+      { trigger: 'manual', messages: transcript() },
+      async () => CORE,
+    )) as { messages?: unknown[] };
+    expect(out.messages).toBeDefined();
+    expect(requests).toBe(0);
+    expect(notices.at(-1)).toMatch(/ in 0 request\(s\)/);
+  });
+});
+
 describe('when Claude Code moves on', () => {
   it('hands nothing back and runs no built-in summary once the signal aborts', async () => {
     const controller = new AbortController();

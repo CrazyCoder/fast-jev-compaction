@@ -188,6 +188,8 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
     const value = options[key];
     if (typeof value === 'boolean') numbers[key] = value;
   }
+  // provider "algorithmic": no decision model, so no key and no request.
+  if (options['provider'] === 'algorithmic') numbers.decider = 'algorithmic';
   const config: HookConfig = {
     ...numbers,
     ...(options['oldProse'] === 'keep' ||
@@ -334,10 +336,11 @@ export async function compactSession(
   sleep?: (ms: number) => Promise<void>,
   signal?: AbortSignal,
 ): Promise<SessionCompaction> {
-  if (!config.apiKey) throw new Error(`${wireFor(config.provider).keyName} is not configured`);
+  const algorithmic = config.decider === 'algorithmic';
+  if (!config.apiKey && !algorithmic) throw new Error(`${wireFor(config.provider).keyName} is not configured`);
   const result = await compact(
     messages,
-    jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl, onRedact, config.provider),
+    jevAsker(fetchFn, config.apiKey ?? '', config.model, config.baseUrl, onRedact, config.provider),
     { ...config, recallNotes: config.recall },
     { summarize, sleep, signal },
   );

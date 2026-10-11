@@ -49,6 +49,7 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   recentTurns: DEFAULT_RECENT_TURNS,
   ageCutResults: false,
   questionCriteria: false,
+  decider: 'model',
 };
 
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
@@ -150,7 +151,35 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
     ),
     ageCutResults: options.ageCutResults === true,
     questionCriteria: options.questionCriteria === true,
+    decider: options.decider === 'algorithmic' ? 'algorithmic' : DEFAULT_OPTIONS.decider,
   };
+}
+
+/** Tools whose call records a change made, which stays worth knowing about. */
+const EDITING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * `decider: 'algorithmic'`: scores from the transcript alone, in the shape
+ * Jev answers in, so the same ranking or threshold applies. A result's score
+ * rises with recency (oldest 0.15, newest 0.85) and by 0.3 for an error; a
+ * call's is 0.95 for an edit or write, else 0.3 to 0.9 with recency and 0.2
+ * more for an error. Candidates come in transcript order.
+ */
+export function algorithmicAnswers(candidates: readonly ToolCall[]): Map<string, CallAnswer> {
+  const last = Math.max(1, candidates.length - 1);
+  return new Map(
+    candidates.map((call, index) => {
+      const recency = candidates.length === 1 ? 1 : index / last;
+      const error = call.isError ? 1 : 0;
+      return [
+        call.id,
+        {
+          keepCall: EDITING_TOOLS.has(call.tool) ? 0.95 : Math.min(1, 0.3 + 0.6 * recency + 0.2 * error),
+          keepResult: Math.min(1, 0.15 + 0.7 * recency + 0.3 * error),
+        },
+      ];
+    }),
+  );
 }
 
 /** The two `noul` questions asked about one call: keep the call, keep its result. */
@@ -703,7 +732,9 @@ export async function compact(
   let requestsFailed = 0;
   let requestError: string | undefined;
   let answers = new Map<string, CallAnswer>();
-  if (candidates.length > 0) {
+  if (candidates.length > 0 && resolved.decider === 'algorithmic') {
+    answers = algorithmicAnswers(candidates);
+  } else if (candidates.length > 0) {
     const goal = resolved.instructions
       ? `${resolved.goal || goalFromMessages(messages)}\nThe user asked this compaction to keep: ${truncate(
           resolved.instructions,

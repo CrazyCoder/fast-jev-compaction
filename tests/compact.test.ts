@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  algorithmicAnswers,
   applyDecisions,
   batchCalls,
   buildJevRequest,
@@ -626,6 +627,21 @@ describe('compact', () => {
     const fresh = await compact(transcript(), fakeJev(() => 0.1), { keepMode: 'threshold', preserveRecentMessages: 1, ageCutResults: true });
     expect(fresh.stats.resultsAged).toBe(0);
     expect(fresh.messages[2]!.toolResults![0]!.text).toMatch(/^[^[]+\n\[jetcompact truncated/);
+  });
+
+  it('decides without asking anyone under decider: algorithmic', async () => {
+    const never: JevAsker = {
+      async ask() {
+        throw new Error('the algorithmic decider asks no model');
+      },
+    };
+    const out = await compact(transcript(), never, { keepMode: 'threshold', preserveRecentMessages: 1, decider: 'algorithmic' });
+    expect(out.stats.requests).toBe(0);
+    // The oldest read is stubbed; the newer read and the error stay whole.
+    expect(out.decisions.map((d) => d.action)).toEqual(['stub_call', 'keep', 'keep']);
+    const scores = algorithmicAnswers(collectToolCalls(transcript(), 1).filter((c) => !c.pinned));
+    expect(scores.get('t1')!.keepResult).toBeLessThan(scores.get('t2')!.keepResult);
+    expect(scores.get('t3')!.keepResult).toBe(1);
   });
 
   it('asks with true/false criteria only under questionCriteria', async () => {
