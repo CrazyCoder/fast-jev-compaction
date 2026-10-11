@@ -1,11 +1,12 @@
 # Evals: JetCompact against Claude Code's built-in summary
 
 Claude Sonnet 5.5 finished every task with either compaction, so the difference
-is in what a compaction costs and what the model does after it:
+is in what a compaction costs and what the model does after it. The model runs
+used the 0.11 defaults, with `targetPercent` as a goal (`8ae477a`):
 
 - **One compaction in a session** (a 150k compaction window): JetCompact cost
-  13% less per run than the built-in summary ($0.73 against $0.84). The model
-  re-read 0.8 files after compacting against 2.1, and a compaction took 0.7 s
+  10% less per run than the built-in summary ($0.76 against $0.84). The model
+  re-read 0.5 files after compacting against 2.1, and a compaction took 0.7 s
   instead of 25 s.
 - **Repeated compaction in a small window** (100k): the two cost the same ($0.89
   against $0.87). JetCompact re-read 0.8 files against 2.3, and a compaction

@@ -201,12 +201,13 @@ user turns. A result that falls below `minReductionRatio` or above
 `targetPercent` is computed again as a harder cut: half the keep budgets, cut
 results kept to `truncateHeadChars` (100 unless set). Both passes share one
 `compactionTimeoutMs`, and the second asks Jev nothing new. When the harder cut
-still misses `targetPercent` but frees `minReductionRatio`, the best result is
-applied, automatic compactions included. When nothing frees that much, the
-result is given up: built-in summary on automatic compactions, skip otherwise.
-The outcome line, and the reason of a refusal or timeout in the second pass, say
-that the first pass was refused. Why these defaults and the options that change
-them: [How hard a compaction cuts](../README.md#how-hard-a-compaction-cuts).
+still misses `targetPercent`, or fails, and the best result frees
+`minReductionRatio`, that result is applied, automatic compactions included.
+When nothing frees that much, the result is given up: built-in summary on
+automatic compactions, skip otherwise. The outcome line, and the reason of a
+refusal or timeout in the second pass, say that the first pass was refused. Why
+these defaults and the options that change them:
+[How hard a compaction cuts](../README.md#how-hard-a-compaction-cuts).
 
 The hook waits at most `compactionTimeoutMs` for the Jev round, across all
 request batches. On a timeout, a plugin-triggered compaction returns a skip

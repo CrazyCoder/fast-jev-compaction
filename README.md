@@ -9,10 +9,11 @@ trimmed, and older prose is condensed into a digest. The model is TypeSafe's
 is lost: the `recall` tool reads back what a compaction cut, and searches your
 past sessions.
 
-In A/B runs against the built-in summary, a compaction took 0.7 s instead of 25
-s and the model re-read fewer files after it; a session that compacts once cost
-13% less, and one that compacts repeatedly in a small window cost the same. See
-[Evals](docs/evals.md).
+In A/B runs against the built-in summary, a compaction took under 2 s instead of
+about 25 s and the model re-read fewer files after it; a session that compacts
+once cost about 10% less, and one that compacts repeatedly in a small window
+cost the same. With the default settings, a replay of long real sessions keeps
+about a third of the context per compaction. See [Evals](docs/evals.md).
 
 JetCompact is a fork of
 [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction). It
