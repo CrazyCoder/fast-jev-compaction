@@ -42,7 +42,10 @@ type Hook = (host: unknown, event: unknown, next: (e: unknown) => unknown) => Pr
 function registered(options: Record<string, unknown>): Record<string, Hook> {
   const hooks: Record<string, Hook> = {};
   (register as unknown as (on: unknown, options: unknown) => void)(
-    (event: string, hook: Hook) => (hooks[event] = hook),
+    (event: string, hook: Hook) => {
+      hooks[event] = hook;
+      return { catch: () => undefined };
+    },
     options,
   );
   return hooks;
@@ -215,7 +218,10 @@ describe('compaction log file', () => {
     const { $ } = fsHost(files, { HOME: '/home/me', TYPESAFE_API_KEY: '' });
     const hooks: Record<string, (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>> = {};
     (register as unknown as (on: unknown, options: unknown) => void)(
-      (event: string, hook: (typeof hooks)[string]) => (hooks[event] = hook),
+      (event: string, hook: (typeof hooks)[string]) => {
+        hooks[event] = hook;
+        return { catch: () => undefined };
+      },
       {},
     );
     const host = { ...$, settings: { read: async () => ({}) }, clock: { sleep: () => new Promise<void>(() => {}) } };
@@ -223,5 +229,30 @@ describe('compaction log file', () => {
     const lines = linesOf(files);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^\S+Z auto fallback to built-in summary \(TYPESAFE_API_KEY is not configured\)$/);
+  });
+
+  it('logs what Claude Code refused or timed out, then lets it go on', async () => {
+    const files = new Map<string, string>();
+    const { $ } = fsHost(files, { HOME: '/home/me' });
+    type Catch = (host: unknown, event: unknown, next: (e: unknown) => unknown) => Promise<unknown>;
+    const catches: Record<string, Catch> = {};
+    (register as unknown as (on: unknown, options: unknown) => void)(
+      (event: string) => ({
+        catch: (handler: Catch) => {
+          catches[event] = handler;
+        },
+      }),
+      {},
+    );
+    const next = (error: Record<string, unknown>, called: boolean) =>
+      Object.assign(async () => 'went on', { error, called });
+    const event = { trigger: 'auto', messages: [] };
+    expect(await catches['session.compact']!($, event, next({ kind: 'timeout' }, false))).toBe('went on');
+    expect(await catches['session.compact']!($, event, next({ kind: 'refused', message: 'bad shape' }, true))).toBe('went on');
+    expect(await catches['session.compact']!($, event, next({ kind: 're-entry' }, false))).toBe('went on');
+    expect(linesOf(files)).toEqual([
+      expect.stringMatching(/Z auto failed in Claude Code \(over its time budget\); built-in summary instead$/),
+      expect.stringMatching(/Z auto failed in Claude Code \(bad shape\); after falling back$/),
+    ]);
   });
 });

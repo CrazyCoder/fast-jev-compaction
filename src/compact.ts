@@ -324,6 +324,14 @@ async function askBatch(
 /** Wait before the one retry of a rate-limited or failed request. */
 export const RETRY_DELAY_MS = 1000;
 
+/** The `signal` passed to `compact` aborted: whoever asked for the compaction moved on. */
+export class CompactionInterrupted extends Error {
+  constructor() {
+    super('compaction interrupted');
+    this.name = 'CompactionInterrupted';
+  }
+}
+
 /**
  * Asks every batch with at most `limit` requests in flight. A 429 or 5xx is
  * retried once; after a failure every request would share (401, 403, no
@@ -335,6 +343,7 @@ async function askAll(
   jobs: readonly { state: CompactionState; batch: readonly ToolCall[] }[],
   limit: number,
   sleep: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<{ answers: Map<string, CallAnswer>; failures: unknown[] }> {
   const answers = new Map<string, CallAnswer>();
   const failures: unknown[] = [];
@@ -346,6 +355,7 @@ async function askAll(
     } catch (error) {
       if (!isRetryable(error)) throw error;
       await sleep(RETRY_DELAY_MS);
+      if (signal?.aborted) throw new CompactionInterrupted();
       if (stop !== undefined) throw stop;
       return askBatch(asker, job.state, job.batch);
     }
@@ -354,6 +364,8 @@ async function askAll(
     while (next < jobs.length) {
       const job = jobs[next]!;
       next += 1;
+      // Whoever asked has moved on: start nothing more.
+      if (signal?.aborted) stop ??= new CompactionInterrupted();
       if (stop !== undefined) {
         failures.push(stop);
         continue;
@@ -593,7 +605,7 @@ export async function compact(
   original: readonly Message[],
   asker: JevAsker,
   options: CompactOptions = {},
-  deps: { summarize?: ProseSummarizer; sleep?: (ms: number) => Promise<void> } = {},
+  deps: { summarize?: ProseSummarizer; sleep?: (ms: number) => Promise<void>; signal?: AbortSignal } = {},
 ): Promise<CompactResult> {
   const started = Date.now();
   const resolved = resolveOptions(options);
@@ -628,7 +640,9 @@ export async function compact(
     requests = jobs.length;
     // Without a host clock the one retry goes out at once.
     const sleep = deps.sleep ?? (async () => {});
-    const asked = await askAll(asker, jobs, resolved.maxConcurrentRequests, sleep);
+    if (deps.signal?.aborted) throw new CompactionInterrupted();
+    const asked = await askAll(asker, jobs, resolved.maxConcurrentRequests, sleep, deps.signal);
+    if (deps.signal?.aborted) throw new CompactionInterrupted();
     // Nothing answered: let the caller fall back with the reason.
     if (jobs.length > 0 && asked.failures.length === jobs.length) throw asked.failures[0];
     answers = asked.answers;

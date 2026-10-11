@@ -4,7 +4,7 @@ import { register } from '../hooks/jetcompact.ts';
 describe('turn.complete in a headless session', () => {
   it('stops retrying after the host says compact is unavailable', async () => {
     const handlers: Record<string, Function> = {};
-    register(((name: string, h: Function) => { handlers[name] = h; }) as never, {} as never);
+    register(((name: string, h: Function) => { handlers[name] = h; return { catch: () => undefined }; }) as never, {} as never);
     const logs: string[] = [];
     let compacts = 0;
     let queued = 0;

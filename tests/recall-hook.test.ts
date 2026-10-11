@@ -18,6 +18,7 @@ function hooks(options: Record<string, unknown> = {}) {
     (event: string, filterOrHook: Hook | { tool?: string; command?: string }, hook?: Hook) => {
       const key = typeof filterOrHook === 'function' ? event : `${event}:${filterOrHook.tool ?? filterOrHook.command}`;
       registered[key] = hook ?? (filterOrHook as Hook);
+      return { catch: () => undefined };
     },
     options,
   );

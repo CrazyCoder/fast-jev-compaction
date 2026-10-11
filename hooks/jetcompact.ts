@@ -82,6 +82,12 @@ export function prosePlans(config: HookConfig, messages: readonly Message[]): Pa
  */
 const RETRY_AFTER_SKIP_PERCENT = 10;
 
+/**
+ * The args of the /compact the hook queues in a headless session, so the
+ * session.compact it raises is told apart from a /compact the person typed.
+ */
+export const QUEUED_COMPACT_ARGS = `automatic, from ${PLUGIN_ID}`;
+
 export type HookFetchInit = {
   method?: string;
   headers?: Record<string, string>;
@@ -325,13 +331,14 @@ export async function compactSession(
   onRedact?: (count: number) => void,
   summarize?: ProseSummarizer,
   sleep?: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<SessionCompaction> {
   if (!config.apiKey) throw new Error(`${wireFor(config.provider).keyName} is not configured`);
   const result = await compact(
     messages,
     jevAsker(fetchFn, config.apiKey, config.model, config.baseUrl, onRedact, config.provider),
     { ...config, recallNotes: config.recall },
-    { summarize, sleep },
+    { summarize, sleep, signal },
   );
   return { result, messages: toSessionMessages(messages, result.messages) };
 }
@@ -721,12 +728,37 @@ export const register: Register = (on: On, options: PluginOptions) => {
       );
     }
 
+    // The /compact this hook queued in a headless session is automatic; a
+    // /compact the person typed is an explicit request.
+    const queued = event.trigger === 'manual' && event.instructions?.trim() === QUEUED_COMPACT_ARGS;
+    const trigger = queued ? 'auto' : event.trigger;
+    const typed = trigger === 'manual';
+    // The smallest result any attempt produced, for a typed /compact the size
+    // guards refused, and for a built-in summary that fails.
+    let best: { messages: SessionMessage[]; ratio: number; detail: string } | undefined;
+    // Esc, a hook above settling first, or the budget: Claude Code has moved
+    // on, so stop and hand back nothing it would act on.
+    const interrupted = async () => {
+      debugLog($, 'interrupted: Claude Code moved on before the compaction finished; nothing handed back');
+      await appendCompactionLog($, `${trigger} interrupted: Claude Code moved on; nothing handed back`);
+      return { skip: 'interrupted' };
+    };
     const giveUp = async (why: string) => {
-      if (mayUseBuiltin(event.trigger, configured.builtinFallback)) {
-        await notify($, event.trigger, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
-        return next(event);
+      if (next.signal?.aborted) return interrupted();
+      if (mayUseBuiltin(trigger, configured.builtinFallback)) {
+        await notify($, trigger, `fallback to built-in summary (${why})`, `built-in summary (${toastReason(why)})`);
+        try {
+          return await next(event);
+        } catch (error) {
+          // The built-in summary failed: the reduction this hook already made
+          // beats leaving the session over its limit.
+          if (!best || next.signal?.aborted) throw error;
+          const failure = error instanceof Error ? error.message : String(error);
+          await notify($, trigger, `built-in summary failed (${failure}); kept this compaction instead: ${best.detail}`, 'built-in summary failed, kept own result');
+          return { messages: best.messages };
+        }
       }
-      await notify($, event.trigger, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
+      await notify($, trigger, `not compacted, no built-in summary (${why})`, `not compacted (${toastReason(why)})`);
       const reason = why.length > 200 ? `${why.slice(0, 200)}…` : why;
       return { skip: `${PLUGIN_ID}: ${reason}; conversation left as it is` };
     };
@@ -739,7 +771,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
       const config = {
         ...configured,
         apiKey: await getApiKey($, configured),
-        instructions: event.instructions,
+        instructions: queued ? undefined : event.instructions,
       };
       let percentBefore: number | undefined;
       try {
@@ -774,11 +806,13 @@ export const register: Register = (on: On, options: PluginOptions) => {
                 if (!reply.isAnswered) throw new Error(`prose model did not answer (${reply.reason})`);
                 return reply.text;
               },
-              (ms) => $.clock.sleep(ms),
+              (ms) => $.clock.sleep(ms, next.signal ? { signal: next.signal } : undefined),
+              next.signal,
             ),
           remaining,
           (ms, options) => $.clock.sleep(ms, options),
         );
+        if (next.signal?.aborted) return interrupted();
         debugLog($, `redacted ${redacted} secret-shaped value(s) from the Jev request`);
         for (const line of decisionLogLines(result)) debugLog($, line);
         // Rows go back without handles, which costs them their hidden content:
@@ -809,7 +843,11 @@ export const register: Register = (on: On, options: PluginOptions) => {
           hiddenNote += `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
         }
         const estimate = estimatePostCompactPercent(percentBefore, measured.stats);
-        if (reductionRatio(measured) < config.minReductionRatio) {
+        const ratio = reductionRatio(measured);
+        if (ratio > 0 && (!best || ratio > best.ratio)) {
+          best = { messages: withoutHandles(returned), ratio, detail: `${summarize(measured)}${hiddenNote}` };
+        }
+        if (ratio < config.minReductionRatio) {
           refusedBecause = `below ${percent(config.minReductionRatio)} minimum`;
         } else if (exceedsTarget(estimate, config.targetPercent)) {
           refusedBecause = `estimated ~${Math.round(estimate ?? 0)}% context after compaction, above the ${config.targetPercent}% target`;
@@ -817,7 +855,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
           const retried = verbatimRefused ? `; verbatim prose was refused (${verbatimRefused})` : '';
           await notify(
             $,
-            event.trigger,
+            trigger,
             `kept ${messages.length}/${event.messages.length} messages, no summary (${summarize(measured)})${hiddenNote}${retried}`,
             `compacted, ${percent(reductionRatio(measured))} smaller (${messages.length}/${event.messages.length} messages)`,
           );
@@ -825,15 +863,40 @@ export const register: Register = (on: On, options: PluginOptions) => {
         }
         refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }
+      // The guards keep automatic compactions from running back to back; a
+      // /compact the person typed is applied whenever it frees anything.
+      if (typed && best) {
+        await notify(
+          $,
+          trigger,
+          `kept the smallest result although ${afterVerbatim(refusedBecause)}, since /compact was typed (${best.detail})`,
+          `compacted, ${percent(best.ratio)} smaller`,
+        );
+        return { messages: best.messages };
+      }
       return giveUp(afterVerbatim(refusal));
     } catch (error) {
+      if (next.signal?.aborted) return interrupted();
       const why = afterVerbatim(error instanceof Error ? error.message : String(error));
       if (error instanceof CompactionTimeoutError && event.trigger === 'plugin') {
-        await notify($, event.trigger, `not compacted (${why})`, `not compacted (${toastReason(why)})`);
+        await notify($, trigger, `not compacted (${why})`, `not compacted (${toastReason(why)})`);
         return { skip: `${PLUGIN_ID}: ${why}; conversation left unchanged` };
       }
       return giveUp(why);
     }
+  }).catch(async ($, event, next) => {
+    // Claude Code refused what the hook returned, the hook threw, or it ran
+    // over its time budget: log it, then let Claude Code go on without it.
+    const { kind, message } = next.error;
+    // Raised beneath its own call, the hook's $ calls reject: nothing to log.
+    if (kind !== 're-entry') {
+      const why = kind === 'timeout' ? 'over its time budget' : (message ?? 'it threw');
+      await appendCompactionLog(
+        $,
+        `${event.trigger} failed in Claude Code (${why}); ${next.called ? 'after falling back' : 'built-in summary instead'}`,
+      );
+    }
+    return next(event);
   });
 
   on('turn.complete', async ($, event: TurnCompleteInput, next) => {
@@ -856,7 +919,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         // that worked brings usage under compactAtPercent, which clears the wait.
         retryAtPercent = used + RETRY_AFTER_SKIP_PERCENT;
         await appendCompactionLog($, `auto-compact at ${Math.round(used)}%: headless session, queued /compact`);
-        void $.command.run({ command: 'compact' }).catch((queued: unknown) =>
+        void $.command.run({ command: 'compact', args: QUEUED_COMPACT_ARGS }).catch((queued: unknown) =>
           debugLog($, `auto-compact skipped (${queued instanceof Error ? queued.message : String(queued)})`),
         );
         return next(event);

@@ -7,6 +7,7 @@ import {
   getApiKey,
   jevAsker,
   mayUseBuiltin,
+  QUEUED_COMPACT_ARGS,
   register,
   estimatePostCompactPercent,
   exceedsTarget,
@@ -50,7 +51,7 @@ function registeredHooks(options: Record<string, unknown> = {}): Map<string, Hoo
   const handlers = new Map<string, HookHandler>();
   const on = ((name: string, ...args: unknown[]) => {
     handlers.set(name, args.at(-1) as HookHandler);
-    return {};
+    return { catch: () => undefined };
   }) as never;
   register(on, options as never);
   return handlers;
@@ -521,6 +522,7 @@ function hooks(options: Record<string, unknown> = {}): Record<string, Hook> {
   const registered: Record<string, Hook> = {};
   const on = (event: string, hook: Hook) => {
     registered[event] = hook;
+    return { catch: () => undefined };
   };
   (register as unknown as (on: unknown, options: unknown) => void)(on, options);
   return registered;
@@ -553,16 +555,21 @@ async function compactWith(
   trigger: string,
   fetch: ReturnType<typeof jevFetch>,
   options: Record<string, unknown> = {},
+  more: { instructions?: string; signal?: AbortSignal; builtin?: () => Promise<unknown> } = {},
 ) {
   const { $, notices, sinks, toasts } = host(fetch);
   let delegated = false;
-  const out = await hooks({ preserveRecentMessages: 1, ...options })['session.compact']!(
-    $,
-    { trigger, messages: transcript() },
+  const next = Object.assign(
     async () => {
       delegated = true;
-      return CORE;
+      return more.builtin ? more.builtin() : CORE;
     },
+    { signal: more.signal },
+  );
+  const out = await hooks({ preserveRecentMessages: 1, ...options })['session.compact']!(
+    $,
+    { trigger, messages: transcript(), instructions: more.instructions },
+    next,
   );
   return { out, delegated, notices, sinks, toasts };
 }
@@ -587,6 +594,70 @@ describe('compaction output on screen', () => {
 });
 
 const failing = async () => ({ status: 500, ok: false, text: 'upstream error' });
+
+describe('who asked for the compaction', () => {
+  it('treats the /compact it queued itself as automatic: guards apply, the built-in summary may run', async () => {
+    const asked: string[] = [];
+    const fetch = jevFetch((name) => {
+      asked.push(name);
+      return 0.9;
+    });
+    const { out, delegated, notices } = await compactWith('manual', fetch, { keepMode: 'threshold' }, {
+      instructions: QUEUED_COMPACT_ARGS,
+    });
+    expect(delegated).toBe(true);
+    expect(out).toBe(CORE);
+    expect(notices.at(-1)).toMatch(/^fallback to built-in summary/);
+    expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the queued marker out of the goal Jev is given', async () => {
+    let body = '';
+    const fetch = async (_url: string, init: { body: string }) => {
+      body = init.body;
+      return jevFetch(() => 0.1)(_url, init);
+    };
+    await compactWith('manual', fetch as never, {}, { instructions: QUEUED_COMPACT_ARGS });
+    expect(body).not.toContain(QUEUED_COMPACT_ARGS);
+  });
+});
+
+describe('when Claude Code moves on', () => {
+  it('hands nothing back and runs no built-in summary once the signal aborts', async () => {
+    const controller = new AbortController();
+    const fetch = async () => {
+      controller.abort();
+      return { status: 503, ok: false, text: 'busy' };
+    };
+    const { out, delegated } = await compactWith('auto', fetch, {}, { signal: controller.signal });
+    expect(out).toEqual({ skip: 'interrupted' });
+    expect(delegated).toBe(false);
+  });
+});
+
+describe('a built-in summary that fails', () => {
+  it('installs the hook\'s own smaller result instead', async () => {
+    const options = { keepMode: 'threshold', minReductionRatio: 0.99 };
+    const { out, delegated, notices } = await compactWith('auto', jevFetch(() => 0.1), options, {
+      builtin: async () => {
+        throw new Error('prompt is too long');
+      },
+    });
+    expect(delegated).toBe(true);
+    expect((out as { messages?: unknown[] }).messages).toBeDefined();
+    expect(notices.at(-1)).toMatch(/^built-in summary failed \(prompt is too long\); kept this compaction instead/);
+  });
+
+  it('rethrows when the hook has no smaller result to offer', async () => {
+    await expect(
+      compactWith('auto', failing, {}, {
+        builtin: async () => {
+          throw new Error('prompt is too long');
+        },
+      }),
+    ).rejects.toThrow('prompt is too long');
+  });
+});
 
 describe('built-in summary fallback', () => {
   it('is only for the engine auto compaction by default', () => {
@@ -689,7 +760,10 @@ describe('turn.complete request', () => {
 describe('auto-compaction at compactAtPercent', () => {
   function turnEnd(compact: () => Promise<unknown>) {
     const hooks: Record<string, (...args: any[]) => Promise<any>> = {};
-    register(((name: string, hook: any) => void (hooks[name] = hook)) as never, { compactAtPercent: 50 } as never);
+    register(((name: string, hook: any) => {
+      hooks[name] = hook;
+      return { catch: () => undefined };
+    }) as never, { compactAtPercent: 50 } as never);
     const commands: string[] = [];
     const log: string[] = [];
     const $ = {
@@ -812,14 +886,16 @@ describe('old prose through the hook', () => {
     message('assistant', 'Read it.'),
     message('user', 'next'),
   ];
-  async function compactPlain(options: Record<string, unknown>, messages: unknown[]) {
+  // 'plugin': the hook's own compaction in an interactive session, which the
+  // size guards apply to and which never falls back to the built-in summary.
+  async function compactPlain(options: Record<string, unknown>, messages: unknown[], trigger = 'plugin') {
     const { $, notices } = host(jevFetch(() => 0.1));
     // threshold: every result Jev scores 0.1 is cut, whatever its size.
     const out = (await hooks({ preserveRecentMessages: 2, recentTurns: 3, keepMode: 'threshold', ...options })[
       'session.compact'
     ]!(
       $,
-      { trigger: 'manual', messages },
+      { trigger, messages },
       async () => ({ messages: [] }),
     )) as { messages?: { text: string }[]; skip?: string };
     return { out, notices };
@@ -898,5 +974,12 @@ describe('old prose through the hook', () => {
   it('does not retry an explicit oldProse: keep', async () => {
     const { out } = await compactPlain({ oldProse: 'keep' }, turns(12));
     expect(out.skip).toMatch(/below 25% minimum/);
+  });
+
+  it('applies a typed /compact the size guards refuse, with its smallest result', async () => {
+    const { out, notices } = await compactPlain({ minReductionRatio: 0.99 }, turns(12), 'manual');
+    expect(out.skip).toBeUndefined();
+    expect(out.messages!.some((m) => digestMarker.test(m.text))).toBe(true);
+    expect(notices.at(-1)).toMatch(/kept the smallest result although .*below 99% minimum, since \/compact was typed/);
   });
 });
