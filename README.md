@@ -44,7 +44,7 @@ same questions, so here is how JetCompact answers them.
 | The output is "deleted permanently", so the agent must re-run the tool. | That is the original's README. JetCompact deletes nothing from the transcript, and `recall` reads it back. |
 | Reasoning traces are lost. | Every compaction loses them: the built-in summary replaces the whole history, reasoning included. JetCompact keeps the last 4 turns and the kept tool output word for word and older turns as a digest, but no reasoning blocks either. |
 | Models are trained on their own compaction summary. | Not measured directly. In the evals every arm finished every task, so these tasks do not separate the two on success. |
-| Editing history invalidates the prompt cache. | Every compaction rewrites the cache, the built-in one too. How much context a compaction keeps decides how often the cache is rewritten and how much each later turn reads from it. Since 0.12 JetCompact keeps about a third of the context, which the cost model puts below the built-in summary over a long session; see [How hard a compaction cuts](#how-hard-a-compaction-cuts). |
+| Editing history invalidates the prompt cache. | Every compaction rewrites the cache, the built-in one too. How much context a compaction keeps decides how often the cache is rewritten and how much each later turn reads from it. JetCompact keeps about a third of the context, which the cost model puts below the built-in summary over a long session; see [How hard a compaction cuts](#how-hard-a-compaction-cuts). |
 
 ## Added in JetCompact
 
@@ -178,8 +178,9 @@ When the result frees less than `minReductionRatio` (25%) or leaves more than
 `targetPercent` (45% of the compaction window), a **harder cut** is tried: the
 keep budgets halve and cut results keep 100 characters. It asks Jev nothing new.
 An automatic compaction that still misses `targetPercent` applies its best
-result anyway when that frees 25%. Claude Code's built-in summary runs only when
-JetCompact cannot free 25% or the decision model fails.
+result anyway when that frees 25%. Claude Code's built-in summary runs only for
+an automatic compaction that JetCompact cannot free 25% of, or whose decision
+model fails; a typed `/compact` applies whatever it frees.
 
 The digest keeps the first prompt (up to 2,000 characters), each later prompt
 (up to 400), the assistant's final reply of each turn (up to 500), the tool
@@ -198,8 +199,9 @@ research and evals are needed (see [Evals](docs/evals.md)). These defaults come
 from what was measured:
 
 - **Fast on every compaction.** No compaction falls back to the built-in summary
-  just for missing `targetPercent`, so a compaction takes under a second instead
-  of about 25 s.
+  just for missing `targetPercent`. In the repeated-compaction evals a
+  compaction took 1.8 s on average, against about 25 s, and the few that fell
+  back freed less than 25%.
 - **About a third of the context kept.** In a replay of 30 large real sessions,
   these defaults kept 36% of the context, against 70% with the earlier defaults
   (prose verbatim, 12,000 / 4,000-token budgets, 8 recent turns). A smaller
@@ -207,9 +209,10 @@ from what was measured:
   projects a long session at about $36 instead of $65, against $45 with the
   built-in summary.
 - **Little more lost.** The share of cut results that the agent needed again
-  later went from 2.2% to 3.1%. Per compaction it went from 1.4 to 1.6, because
-  there are fewer compactions. With live Jev the rate went from 1.9% to 2.6%.
-  `recall` gets any of it back.
+  later went from 2.2% to 3.1%. Per compaction it went from 1.4 to 1.6, and a
+  session compacts about a third less often, so it loses about as much as
+  before. With live Jev the rate went from 1.9% to 2.6%. `recall` gets any of it
+  back.
 - **The floor stays flat.** Each compaction ended about 6k tokens above the last
   one, against 21k with prose verbatim, so long sessions keep compacting.
 - **Why digest first.** Digesting old prose freed as much as quartering the tool
@@ -218,7 +221,7 @@ from what was measured:
   than it saved. 2 recent turns lost about as much as 4, but the loss measure
   does not see instructions lost from prose, so 4 stay. 100-character heads
   doubled the loss, so heads stay at 300. Keeping no results at all, as pi-vcc
-  does, lost 3 times as much.
+  does, lost about 3 times as much per compaction as the 0.11 defaults.
 
 **Cons**
 

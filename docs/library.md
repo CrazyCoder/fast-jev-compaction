@@ -98,7 +98,7 @@ Plugin-only options (set as plugin options, see
 `minReductionRatio` (0.25), `compactionTimeoutMs` (15000), `builtinFallback`
 (`auto`), `targetPercent` (45: the estimated post-compaction context percentage
 the plugin aims under), `envFile`. With `oldProse` unset, the plugin digests old
-prose (`oldProse: 'digest'`; the library's own default stays `keep`). A refused
+prose (`oldProse: 'digest'`; the library's own default is `keep`). A refused
 result is tried once more as a harder cut (half the keep budgets,
 `truncateHeadChars: 100`), and an automatic compaction that still misses
 `targetPercent` applies its best result when that frees `minReductionRatio`; see
