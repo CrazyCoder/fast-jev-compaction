@@ -514,6 +514,22 @@ export function ownCutNote(id: string, text: string): RegExpExecArray | null {
 }
 
 /**
+ * Whether result `id` was cut by an earlier compaction: its note at the end,
+ * or followed by hidden content that compaction folded in after it (a blank
+ * line, then the piece). A note in the recall form must name `id`.
+ */
+export function wasCutBefore(id: string, text: string): boolean {
+  if (ownCutNote(id, text) !== null) return true;
+  const rest = [restOf(id, true, ''), RERUN].map(escapeRegExp).join('|');
+  const note = new RegExp(`\\[${PLUGIN_ID} truncated \\d+ chars of this tool result(?: \\(error\\))?(?:${rest})\\]\\n\\n`);
+  return note.test(text);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * `ageCutResults`: every result that came in already cut by an earlier
  * compaction, and is not pinned, loses its head; the note, with the count
  * raised by the head's length, is all that stays.
@@ -560,6 +576,9 @@ function ageCutResults(
   return { messages, count: aged.size };
 }
 
+/** A result's cut note without recall: the rest is the tool's to give again. */
+const RERUN = '; re-run the tool if needed';
+
 /** How a cut note says to get the rest: the recall tool by id, or running the tool again. */
 function restOf(id: string, recall: boolean, fallback: string): string {
   return recall ? `; full text: recall expand ["${id}"]` : fallback;
@@ -573,7 +592,7 @@ function truncatedResultText(text: string, isError: boolean, headChars: number, 
   const head = cut > 0 ? `${text.slice(0, cut)}\n` : '';
   return `${head}[${PLUGIN_ID} truncated ${text.length - cut} chars of this tool result${
     isError ? ' (error)' : ''
-  }${restOf(id, recall, '; re-run the tool if needed')}]`;
+  }${restOf(id, recall, RERUN)}]`;
 }
 
 function truncatedInput(input: Record<string, unknown>, headChars: number, id: string, recall: boolean): Record<string, unknown> {

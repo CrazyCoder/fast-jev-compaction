@@ -258,5 +258,12 @@ describe('compaction log file', () => {
     const typed = await catches['session.compact']!($, { trigger: 'manual', messages: [] }, next({ kind: 'timeout' }, false));
     expect(typed).toEqual({ skip: expect.stringMatching(/the compaction failed/) });
     expect(linesOf(files).at(-1)).toMatch(/Z manual failed in Claude Code \(over its time budget\); not compacted$/);
+    // Esc while the failure was handled: nothing runs instead. The time budget
+    // aborts the signal as well, and still gets the built-in summary.
+    const aborted = AbortSignal.abort();
+    const escaped = Object.assign(next({ kind: 'throw', message: 'refused' }, false), { signal: aborted });
+    expect(await catches['session.compact']!($, event, escaped)).toEqual({ skip: 'interrupted' });
+    const late = Object.assign(next({ kind: 'timeout' }, false), { signal: aborted });
+    expect(await catches['session.compact']!($, event, late)).toBe('went on');
   });
 });

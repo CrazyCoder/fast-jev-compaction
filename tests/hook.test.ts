@@ -962,6 +962,22 @@ describe('the harder cut', () => {
     expect(notice).not.toMatch(/was refused/);
   });
 
+  it('sees an earlier cut whose result had hidden content folded in after its note', async () => {
+    const folded = '\n\n<system-reminder>A skill body folded back.</system-reminder>';
+    for (const note of [
+      '[jetcompact truncated 9000 chars of this tool result; full text: recall expand ["old"]]',
+      '[jetcompact truncated 9000 chars of this tool result (error); full text: recall expand ["old"]]',
+      '[jetcompact truncated 9000 chars of this tool result; re-run the tool if needed]',
+    ]) {
+      const { out, notice } = await compactThree([
+        call('old', 'Read', { file_path: 'src/old.ts' }, ''),
+        result('old', `${'o'.repeat(300)}\n${note}${folded}`),
+      ]);
+      expect(out.messages, note).toBeDefined();
+      expect(notice, note).not.toMatch(/was refused/);
+    }
+  });
+
   it('is not set off by a tool output that quotes another call\'s cut note', async () => {
     // A log read back, ending with a note this plugin wrote for call "x".
     const { notice } = await compactThree([

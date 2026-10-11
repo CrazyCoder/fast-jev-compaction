@@ -13,9 +13,9 @@ import {
   compact,
   CompactionInterrupted,
   DEFAULT_OPTIONS,
-  ownCutNote,
   reductionRatio,
   resolveOptions,
+  wasCutBefore,
 } from '../src/compact.js';
 import { parseEnv } from '../src/dotenv.js';
 import { redactDeep } from '../src/redact.js';
@@ -115,7 +115,7 @@ export function compactionPlans(config: HookConfig, messages: readonly Message[]
 /** Whether an earlier compaction cut a result in `messages`. */
 function compactedBefore(messages: readonly Message[]): boolean {
   return messages.some((message) =>
-    (message.toolResults ?? []).some((result) => ownCutNote(result.tool_use_id, result.text)),
+    (message.toolResults ?? []).some((result) => wasCutBefore(result.tool_use_id, result.text)),
   );
 }
 
@@ -1038,6 +1038,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
       await appendCompactionLog($, `${trigger} failed in Claude Code (${why}); ${then}`);
     }
     if (!builtin) return { skip: `${PLUGIN_ID}: the compaction failed; conversation left as it is` };
+    // Esc while this ran: Claude Code has moved on. Running over the time
+    // budget aborts the signal too, and that one still gets the built-in summary.
+    if (kind !== 'timeout' && !next.called && next.signal?.aborted) return { skip: 'interrupted' };
     return next(queued ? { ...event, instructions: undefined } : event);
   });
 

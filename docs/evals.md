@@ -72,7 +72,9 @@ runs exercised), 8 runs on four of those tasks (`api-migration`, `csv-export`,
 
 12 runs per arm at a 100k window on the two long tasks and two recall tasks,
 which compacted 1 to 4 times each (JetCompact before the fix 2 to 4, the
-built-in summary and 0.11 1 to 3):
+built-in summary and 0.11 1 to 3). The JetCompact columns ran at `09b893e` (0.11
+before the fix), `7cf973b` (the sticky harder cut added) and `7b4496d` (the
+window fix):
 
 |  | Built-in summary | 0.11 before the fix | Sticky harder cut | 0.11 |
 | -- | -- | -- | -- | -- |
