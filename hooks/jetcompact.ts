@@ -74,11 +74,22 @@ export interface CompactionPlan {
  * their note, the keep budgets halve and heads shrink to 100 characters. In
  * the A/B evals a compaction soon after a light one often freed under 25% and
  * fell back to the built-in summary; this tries what is left first.
+ *
+ * Once the conversation holds a cut from an earlier compaction, every plan
+ * cuts that hard. The first compaction stays light, which is where the evals
+ * saw no re-reads after compacting; later ones keep less, so the next
+ * compaction comes later and the cache is rewritten less often (docs/evals.md).
  */
 export function compactionPlans(config: HookConfig, messages: readonly Message[]): CompactionPlan[] {
   const half = (value: number | undefined, fallback: number) => Math.floor((value ?? fallback) / 2);
   const canDigest = Boolean(splitOldProse(messages, config.recentTurns ?? DEFAULT_RECENT_TURNS));
   const hasDigest = messages.some((message) => parseCondensed(message)?.kind === 'digest');
+  const harderOptions = {
+    ageCutResults: config.ageCutResults ?? true,
+    keepResultTokens: half(config.keepResultTokens, DEFAULT_OPTIONS.keepResultTokens),
+    keepCallTokens: half(config.keepCallTokens, DEFAULT_OPTIONS.keepCallTokens),
+    truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
+  };
   const prose: CompactionPlan[] = config.oldProse
     ? [{ label: 'configured', options: {} }]
     : hasDigest
@@ -89,18 +100,16 @@ export function compactionPlans(config: HookConfig, messages: readonly Message[]
             ? [{ label: 'digest', options: { oldProse: 'digest' as const, truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS } }]
             : []),
         ];
-  const last = prose.at(-1)!.options;
-  const harder: CompactionPlan = {
-    label: 'harder cut',
-    options: {
-      ...last,
-      ageCutResults: config.ageCutResults ?? true,
-      keepResultTokens: half(config.keepResultTokens, DEFAULT_OPTIONS.keepResultTokens),
-      keepCallTokens: half(config.keepCallTokens, DEFAULT_OPTIONS.keepCallTokens),
-      truncateHeadChars: config.truncateHeadChars ?? DIGEST_HEAD_CHARS,
-    },
-  };
-  return [...prose, harder];
+  if (compactedBefore(messages)) {
+    return prose.map((plan) => ({ label: plan.label, options: { ...plan.options, ...harderOptions } }));
+  }
+  return [...prose, { label: 'harder cut', options: { ...prose.at(-1)!.options, ...harderOptions } }];
+}
+
+/** Whether an earlier compaction cut a result in `messages`. */
+function compactedBefore(messages: readonly Message[]): boolean {
+  const marker = `[${PLUGIN_ID} truncated `;
+  return messages.some((message) => (message.toolResults ?? []).some((result) => result.text.includes(marker)));
 }
 
 /**

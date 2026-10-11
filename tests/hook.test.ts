@@ -861,13 +861,16 @@ describe('auto-compaction at compactAtPercent', () => {
 });
 
 describe('the harder cut', () => {
-  it('cuts with half the budgets when the first attempt keeps too much, and asks Jev once', async () => {
+  /**
+   * An automatic compaction of three results that just fit keepResultTokens
+   * (12000) together, so only half of it cuts anything; `earlier` comes first.
+   */
+  async function compactThree(earlier: SessionMessage[] = []) {
     const bodies: string[] = [];
     const { $, notices } = host(jevFetch(() => 0.9, bodies));
-    // Three results that just fit keepResultTokens (12000) together; half of
-    // it keeps one.
     const messages = [
       message('user', 'Fix the parser.'),
+      ...earlier,
       ...['a', 'b', 'c'].flatMap((id) => [call(id, 'Read', { file_path: `src/${id}.ts` }, ''), result(id, id.repeat(15_000))]),
       message('assistant', 'Read them.'),
       message('user', 'next'),
@@ -877,9 +880,24 @@ describe('the harder cut', () => {
       { trigger: 'auto', messages },
       async () => ({ messages: [] }),
     )) as { messages?: unknown[] };
+    return { out, notice: notices.at(-1), bodies };
+  }
+
+  it('cuts with half the budgets when the first attempt keeps too much, and asks Jev once', async () => {
+    const { out, notice, bodies } = await compactThree();
     expect(out.messages).toBeDefined();
-    expect(notices.at(-1)).toMatch(/; verbatim prose was refused \(below 25% minimum\)$/);
+    expect(notice).toMatch(/; verbatim prose was refused \(below 25% minimum\)$/);
     expect(bodies).toHaveLength(1);
+  });
+
+  it('cuts that hard from the first attempt once an earlier compaction cut something', async () => {
+    const { out, notice } = await compactThree([
+      call('old', 'Read', { file_path: 'src/old.ts' }, ''),
+      result('old', `${'o'.repeat(300)}\n[jetcompact truncated 9000 chars of this tool result; full text: recall expand ["old"]]`),
+    ]);
+    expect(out.messages).toBeDefined();
+    expect(notice).not.toMatch(/was refused/);
+    expect(notice).toMatch(/1 earlier cuts? aged/);
   });
 });
 
