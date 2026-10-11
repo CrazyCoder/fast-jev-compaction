@@ -992,8 +992,8 @@ export const register: Register = (on: On, options: PluginOptions) => {
     } catch (error) {
       if (next.signal?.aborted) return interrupted();
       // A later plan failed (Jev, the shared deadline); an earlier one's result
-      // still answers a typed /compact.
-      if (typed && best) {
+      // still applies, as it would have after a refusal.
+      if (best && (typed || best.ratio >= configured.minReductionRatio)) {
         return installBest(`a later attempt failed (${error instanceof Error ? error.message : String(error)})`, best);
       }
       const why = withRefusals(error instanceof Error ? error.message : String(error));

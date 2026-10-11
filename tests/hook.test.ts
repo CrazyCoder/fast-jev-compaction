@@ -744,8 +744,8 @@ describe('an automatic compaction above targetPercent', () => {
       { name: 'Messages', tokens: 40_000, kind: 'used' },
     ],
   };
-  async function run(options: Record<string, unknown>) {
-    const { $, notices } = host(jevFetch(() => 0.1));
+  async function run(options: Record<string, unknown>, fetch: ReturnType<typeof jevFetch> = jevFetch(() => 0.1)) {
+    const { $, notices } = host(fetch);
     const full = { ...$, session: { usage: async () => ({ context: { percent: 50, breakdown } }) } };
     let delegated = false;
     const next = async () => ((delegated = true), CORE);
@@ -760,6 +760,25 @@ describe('an automatic compaction above targetPercent', () => {
     expect(delegated).toBe(false);
     expect(out).toHaveProperty('messages');
     expect(notice).toMatch(/above the 45% target, since it frees at least 25%/);
+  });
+
+  it('keeps its own result when the harder cut runs out of time', async () => {
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const ok = jevFetch(() => 0.1);
+    let result: Awaited<ReturnType<typeof run>>;
+    try {
+      result = await run({}, (async (url: string, init: unknown) => {
+        const reply = await ok(url, init as never);
+        now += 60_000;
+        return reply;
+      }) as never);
+    } finally {
+      clock.mockRestore();
+    }
+    expect(result.delegated).toBe(false);
+    expect(result.out).toHaveProperty('messages');
+    expect(result.notice).toMatch(/kept the smallest result although a later attempt failed/);
   });
 
   it('falls back to the built-in summary when it frees less', async () => {
