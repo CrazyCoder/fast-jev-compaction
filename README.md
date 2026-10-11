@@ -27,6 +27,11 @@ full lineage is under [Features and credits](#features-and-credits).
 | Past-session search | `sessions` searches the other sessions of this project, another one (`project: "billing-api"`) or all of them, and `session` opens one: "do it the way we did in the billing-api session" finds that session. The current session's matches are counted on a last line. With [qmd](https://github.com/tobi/qmd) installed, the search goes through an index of the sessions, which `/recall-index` builds for all projects or the ones you name by name, path or folder. Details: [Searching past sessions](#searching-past-sessions) | JetCompact |
 | Recall guidance | The model is told what compaction cut and how to get it back, at the points where it matters and never on every prompt: the recall tool stays loaded instead of behind ToolSearch, each cut note names the `recall expand` call that returns the rest, a digest or summary says recall reads its turns back, and one note at the top of the compacted history says what this compaction cut and to use recall before re-running a tool or saying something is gone. Each compaction replaces that note. Details: [What the model is told](hooks/README.md#what-the-model-is-told) | JetCompact |
 | Adaptive prose digest | Each compaction keeps your old prose verbatim while that frees enough. When it would be refused, as happens after two or three compactions in a long session, the prose older than `recentTurns` becomes a digest (cut results keep 100-character heads), and later compactions start with the digest, so multi-day sessions keep compacting instead of getting stuck. Pros, cons and options: [Adaptive prose digest](#adaptive-prose-digest) | JetCompact; the digest is QuanticPotatoes' `oldProse: digest` |
+| Harder cut | Before an automatic compaction gives up to the built-in summary, one more attempt ages earlier cuts and halves the keep budgets; see [Adaptive prose digest](#adaptive-prose-digest) | JetCompact |
+| Algorithmic provider | `provider: "algorithmic"` decides with no model and no key, by rules after [pi-vcc](https://github.com/sting8k/pi-vcc) and [pi-blackhole](https://github.com/k0valik/pi-blackhole): superseded reads, repeated calls and fixed errors go first; open errors and edits stay | JetCompact |
+| Typed `/compact` applies | A `/compact` you type is applied whenever it frees anything; the size guards hold back only automatic compactions | ferrisworks (bd4a01d) |
+| Stops when Claude Code moves on | Esc, the hook's time budget or another hook settling first abandons the in-flight request; nothing is returned or delegated | k-metehan (18f69f8, 0f4ca22) |
+| Own result when the summary fails | If Claude Code's built-in summary fails after a fallback, JetCompact installs its own result when that freed anything | deadczarvc (a45402e) |
 | Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | JetCompact |
 
 k-metehan is
@@ -139,6 +144,14 @@ anything to digest; otherwise the refusal stands. Once a compaction has used the
 digest, the next ones start with it, since the conversation holds it, also after
 a restart or `--resume`. A new session, or one whose history Claude Code's
 built-in summary replaced, starts verbatim again.
+
+When that is refused too, a **harder cut** is tried before an automatic
+compaction falls back to Claude Code's built-in summary: results an earlier
+compaction already cut keep only their cut note (`ageCutResults`),
+`keepResultTokens` and `keepCallTokens` halve, and cut results keep 100
+characters. This is the case of a compaction soon after a light one, where the
+first attempts keep everything the previous compaction kept. It asks Jev nothing
+new when only the budgets change.
 
 The digest keeps the first prompt (up to 2,000 characters), each later prompt
 (up to 400), the assistant's final reply of each turn (up to 500), the tool

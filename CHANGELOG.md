@@ -19,6 +19,10 @@ All notable changes to this fork are documented here. The format follows
 
 ### Changed
 
+- Before an automatic compaction falls back to the built-in summary, a harder
+  cut is tried: results an earlier compaction cut keep only their note, the keep
+  budgets halve and heads shrink to 100 characters. Identical Jev requests
+  within one compaction are sent once.
 - A `/compact` you type is applied whenever it frees anything; the size guards
   hold back only automatic compactions. The `/compact` the plugin queues in a
   headless session carries `automatic, from jetcompact` and stays automatic.
