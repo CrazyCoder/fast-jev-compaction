@@ -641,7 +641,36 @@ describe('compact', () => {
     expect(out.decisions.map((d) => d.action)).toEqual(['stub_call', 'keep', 'keep']);
     const scores = algorithmicAnswers(collectToolCalls(transcript(), 1).filter((c) => !c.pinned));
     expect(scores.get('t1')!.keepResult).toBeLessThan(scores.get('t2')!.keepResult);
-    expect(scores.get('t3')!.keepResult).toBe(1);
+    expect(scores.get('t3')!.keepResult).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('scores superseded, resolved and search output low in the algorithmic decider', () => {
+    let at = 0;
+    const tc = (tool: string, input: Record<string, unknown>, more: Partial<ToolCall> = {}): ToolCall => {
+      at += 2;
+      return { id: `t${at / 2}`, tool_use_id: `u${at}`, tool, input, callIndex: at, resultIndex: at + 1, resultChars: 500, isError: false, pinned: false, ...more };
+    };
+    const calls = [
+      tc('Read', { file_path: 'C:\\app\\a.ts' }), // t1: a later Edit changed it
+      tc('Read', { file_path: 'c:/app/b.ts' }), // t2: read again later
+      tc('Read', { file_path: 'c:/app/d.ts', offset: 900 }, { isError: true }), // t3: fixed by t7
+      tc('Bash', { command: 'make' }, { isError: true }), // t4: still failing
+      tc('Grep', { pattern: 'x' }), // t5: search output
+      tc('Bash', { command: 'git commit -m x' }), // t6: changes state
+      tc('Read', { file_path: 'c:/app/d.ts' }), // t7
+      tc('Edit', { file_path: 'c:/app/a.ts', old_string: 'a', new_string: 'b' }), // t8
+      tc('Read', { file_path: 'C:/app/b.ts' }), // t9
+      tc('Read', { file_path: 'c:/app/c.ts' }), // t10: control, newest of its kind
+    ];
+    const s = algorithmicAnswers(calls);
+    expect(s.get('t1')!.keepResult).toBeLessThanOrEqual(0.05);
+    expect(s.get('t2')!.keepResult).toBeLessThanOrEqual(0.05);
+    expect(s.get('t3')!.keepResult).toBeLessThanOrEqual(0.1);
+    expect(s.get('t4')!.keepResult).toBeGreaterThanOrEqual(0.9);
+    expect(s.get('t5')!.keepResult).toBeLessThan(0.3);
+    expect(s.get('t6')!.keepCall).toBeGreaterThanOrEqual(0.9);
+    expect(s.get('t9')!.keepResult).toBeGreaterThan(0.6);
+    expect(s.get('t10')!.keepResult).toBeGreaterThan(0.8);
   });
 
   it('asks with true/false criteria only under questionCriteria', async () => {

@@ -158,26 +158,91 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
 /** Tools whose call records a change made, which stays worth knowing about. */
 const EDITING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
+const SEARCH_TOOLS = new Set(['Grep', 'Glob', 'LS', 'WebSearch', 'ToolSearch']);
+const CHECK_COMMAND = /\b(npm (run )?(test|build|lint|typecheck)|npx (vitest|jest|tsc|eslint)|vitest|jest|pytest|node --test|tsc|eslint|cargo (test|build|check)|go (test|build|vet)|gradlew?|mvn|make)\b/;
+const STATE_COMMAND = /\b(git (commit|push|reset|rebase|merge|tag|checkout)|gh pr (create|merge|edit))\b/;
+const SETUP_COMMAND = /^(cd|ls|pwd|echo|export|which|mkdir)\b[^|;&]*$/;
+
+const normalPath = (path: unknown): string | undefined =>
+  typeof path === 'string' && path
+    ? path.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, drive: string) => `${drive.toLowerCase()}:`)
+    : undefined;
+const pathOf = (call: ToolCall): string | undefined =>
+  normalPath(call.input['file_path'] ?? call.input['notebook_path'] ?? call.input['path']);
+const commandOf = (call: ToolCall): string =>
+  typeof call.input['command'] === 'string' ? call.input['command'].trim().replace(/\s+/g, ' ') : '';
+/** What makes two calls the same request: the tool and its input, paths and whitespace normalized. */
+const requestKey = (call: ToolCall): string =>
+  call.tool === 'Bash'
+    ? `Bash ${commandOf(call)}`
+    : `${call.tool} ${JSON.stringify({ ...call.input, file_path: pathOf(call) })}`;
+
 /**
  * `decider: 'algorithmic'`: scores from the transcript alone, in the shape
- * Jev answers in, so the same ranking or threshold applies. A result's score
- * rises with recency (oldest 0.15, newest 0.85) and by 0.3 for an error; a
- * call's is 0.95 for an edit or write, else 0.3 to 0.9 with recency and 0.2
- * more for an error. Candidates come in transcript order.
+ * Jev answers in, so the same ranking or threshold applies. `calls` is every
+ * call in transcript order, so later calls outside the candidates count too.
+ *
+ * Base: a result rises with recency (oldest 0.15, newest 0.85); a call is
+ * 0.3 to 0.9 with recency, 0.95 for an edit or write. Then, after pi-vcc's
+ * ranking and pi-blackhole's error tracking:
+ * - a Read of a file a later edit changed, a call repeated later with the
+ *   same input, and a TodoWrite with a later one are superseded: near 0;
+ * - an error a later call resolved (the same command, or the same tool on the
+ *   same path, succeeding) scores low; one still open keeps its result (0.9);
+ * - search and listing output halves, test and build output gains 0.25, a
+ *   result over 20,000 chars loses 0.1;
+ * - a git or gh call that changes state keeps its call (0.9); a setup-only
+ *   command (cd, ls, echo) loses 0.2.
  */
-export function algorithmicAnswers(candidates: readonly ToolCall[]): Map<string, CallAnswer> {
+export function algorithmicAnswers(
+  candidates: readonly ToolCall[],
+  calls: readonly ToolCall[] = candidates,
+): Map<string, CallAnswer> {
   const last = Math.max(1, candidates.length - 1);
+  const later = (call: ToolCall) => calls.filter((other) => other.callIndex > call.callIndex);
+  const clamp = (n: number) => Math.max(0, Math.min(1, n));
   return new Map(
     candidates.map((call, index) => {
       const recency = candidates.length === 1 ? 1 : index / last;
-      const error = call.isError ? 1 : 0;
-      return [
-        call.id,
-        {
-          keepCall: EDITING_TOOLS.has(call.tool) ? 0.95 : Math.min(1, 0.3 + 0.6 * recency + 0.2 * error),
-          keepResult: Math.min(1, 0.15 + 0.7 * recency + 0.3 * error),
-        },
-      ];
+      let keepCall = EDITING_TOOLS.has(call.tool) ? 0.95 : 0.3 + 0.6 * recency;
+      let keepResult = 0.15 + 0.7 * recency;
+      const after = later(call);
+      const path = pathOf(call);
+      const command = commandOf(call);
+
+      if (SEARCH_TOOLS.has(call.tool)) keepResult *= 0.5;
+      if (call.tool === 'Bash' && CHECK_COMMAND.test(command)) keepResult += 0.25;
+      if (call.tool === 'Bash' && STATE_COMMAND.test(command)) keepCall = Math.max(keepCall, 0.9);
+      if (call.tool === 'Bash' && SETUP_COMMAND.test(command)) keepCall -= 0.2;
+      if (call.resultChars > 20_000) keepResult -= 0.1;
+
+      if (call.isError) {
+        const resolved = after.some(
+          (other) =>
+            !other.isError &&
+            other.tool === call.tool &&
+            (call.tool === 'Bash' ? commandOf(other) === command : pathOf(other) === path),
+        );
+        if (resolved) {
+          keepResult = Math.min(keepResult, 0.1);
+        } else {
+          keepResult = Math.max(keepResult, 0.9);
+          keepCall = Math.max(keepCall, 0.9);
+        }
+      }
+
+      const key = requestKey(call);
+      const superseded =
+        after.some((other) => requestKey(other) === key) ||
+        (call.tool === 'Read' &&
+          path !== undefined &&
+          after.some((other) => EDITING_TOOLS.has(other.tool) && !other.isError && pathOf(other) === path)) ||
+        (call.tool === 'TodoWrite' && after.some((other) => other.tool === 'TodoWrite'));
+      if (superseded) {
+        keepResult = Math.min(keepResult, 0.05);
+        keepCall = Math.min(keepCall, 0.15);
+      }
+      return [call.id, { keepCall: clamp(keepCall), keepResult: clamp(keepResult) }];
     }),
   );
 }
@@ -733,7 +798,7 @@ export async function compact(
   let requestError: string | undefined;
   let answers = new Map<string, CallAnswer>();
   if (candidates.length > 0 && resolved.decider === 'algorithmic') {
-    answers = algorithmicAnswers(candidates);
+    answers = algorithmicAnswers(candidates, calls);
   } else if (candidates.length > 0) {
     const goal = resolved.instructions
       ? `${resolved.goal || goalFromMessages(messages)}\nThe user asked this compaction to keep: ${truncate(
