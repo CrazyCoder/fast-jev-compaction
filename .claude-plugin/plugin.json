@@ -169,6 +169,18 @@
       "title": "Model",
       "description": "Model name for the provider; with provider openai a jev name is replaced by gpt-6-luna.",
       "default": "jev-latest"
+    },
+    "ageCutResults": {
+      "type": "boolean",
+      "title": "Age cut results",
+      "description": "A tool result an earlier compaction already cut to a head loses that head at the next compaction: only its cut note stays, and recall returns the full text. Pinned results are never aged.",
+      "default": false
+    },
+    "questionCriteria": {
+      "type": "boolean",
+      "title": "Question criteria",
+      "description": "Give each decision-model question true/false criteria describing what a tool call or result worth keeping looks like (changes made, errors still being diagnosed) and what is safe to cut (superseded reads, passing runs).",
+      "default": false
     }
   },
   "author": {

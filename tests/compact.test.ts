@@ -600,6 +600,42 @@ describe('compact', () => {
     expect(reductionRatio(output)).toBeGreaterThan(0);
   });
 
+  it('ages results an earlier compaction cut: their head goes, their note stays', async () => {
+    const messages = transcript();
+    const cutBefore = `${'h'.repeat(300)}\n[jetcompact truncated 900 chars of this tool result; full text: recall expand ["t1"]]`;
+    messages[2]!.toolResults![0]!.text = cutBefore;
+    messages[1]!.toolUses[0]!.text = cutBefore;
+    const keepAll = fakeJev(() => 0.9);
+    const plain = await compact(messages, keepAll, { keepMode: 'threshold', preserveRecentMessages: 1 });
+    expect(plain.messages[2]!.toolResults![0]!.text).toBe(cutBefore);
+    expect(plain.stats.resultsAged).toBe(0);
+
+    const aged = await compact(messages, keepAll, { keepMode: 'threshold', preserveRecentMessages: 1, ageCutResults: true });
+    const note = '[jetcompact truncated 1200 chars of this tool result; full text: recall expand ["t1"]]';
+    expect(aged.messages[2]!.toolResults![0]!.text).toBe(note);
+    expect(aged.messages[1]!.toolUses[0]!.text).toBe(note);
+    expect(aged.stats.resultsAged).toBe(1);
+    // A result cut by this compaction keeps its head until the next one.
+    const fresh = await compact(transcript(), fakeJev(() => 0.1), { keepMode: 'threshold', preserveRecentMessages: 1, ageCutResults: true });
+    expect(fresh.stats.resultsAged).toBe(0);
+    expect(fresh.messages[2]!.toolResults![0]!.text).toMatch(/^[^[]+\n\[jetcompact truncated/);
+  });
+
+  it('asks with true/false criteria only under questionCriteria', async () => {
+    const asked: JevQuestions[] = [];
+    const recorder: JevAsker = {
+      async ask(_state, questions) {
+        asked.push(questions);
+        return { answers: Object.fromEntries(Object.keys(questions).map((k) => [k, { type: 'noul' as const, noul: 0.9 }])) };
+      },
+    };
+    await compact(transcript(), recorder, { preserveRecentMessages: 1 });
+    await compact(transcript(), recorder, { preserveRecentMessages: 1, questionCriteria: true });
+    const [plain, withCriteria] = [asked[0]!, asked.at(-1)!];
+    expect(Object.values(plain).every((q) => q.type === 'noul' && q.criteria === undefined)).toBe(true);
+    expect(Object.values(withCriteria).every((q) => q.type === 'noul' && q.criteria?.true && q.criteria.false)).toBe(true);
+  });
+
   it('keeps everything without calling Jev when no tool call is a candidate', async () => {
     const seen: Seen[] = [];
     const messages = [message('user', 'hello'), message('assistant', 'hi')];

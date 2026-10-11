@@ -184,8 +184,9 @@ export function resolveHookConfig(options: PluginOptions): HookConfig {
   if (typeof options['dropCalls'] === 'boolean') {
     numbers.dropCalls = options['dropCalls'];
   }
-  if (typeof options['trimHostText'] === 'boolean') {
-    numbers.trimHostText = options['trimHostText'];
+  for (const key of ['trimHostText', 'ageCutResults', 'questionCriteria'] as const) {
+    const value = options[key];
+    if (typeof value === 'boolean') numbers[key] = value;
   }
   const config: HookConfig = {
     ...numbers,
@@ -410,6 +411,7 @@ export function summarize(result: CompactResult): string {
     stats.resultsDropped > 0 ? `${stats.resultsDropped} results truncated` : '',
     stats.callsDropped > 0 ? `${stats.callsDropped} call_dropped` : '',
     stats.callsStubbed > 0 ? `${stats.callsStubbed} call_stubbed` : '',
+    stats.resultsAged > 0 ? `${stats.resultsAged} earlier cuts aged` : '',
     stats.pinned > 0 ? `${stats.pinned} pinned` : '',
     stats.oldProse !== 'keep'
       ? `old prose ${stats.oldProse}: ${stats.oldProseReplaced} messages, ${stats.oldProseCharsBefore}→${stats.oldProseCharsAfter} chars`

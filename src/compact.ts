@@ -47,6 +47,8 @@ export const DEFAULT_OPTIONS: ResolvedCompactOptions = {
   taskResultHeadChars: 4000,
   oldProse: 'keep',
   recentTurns: DEFAULT_RECENT_TURNS,
+  ageCutResults: false,
+  questionCriteria: false,
 };
 
 /** Tokens the request envelope (`model`, key names) adds around state and questions. */
@@ -146,22 +148,39 @@ export function resolveOptions(options: CompactOptions = {}): ResolvedCompactOpt
       1,
       Math.floor(finite(options.recentTurns, DEFAULT_OPTIONS.recentTurns)),
     ),
+    ageCutResults: options.ageCutResults === true,
+    questionCriteria: options.questionCriteria === true,
   };
 }
 
 /** The two `noul` questions asked about one call: keep the call, keep its result. */
-export function questionsFor(call: ToolCall): JevQuestions {
+export function questionsFor(call: ToolCall, criteria = false): JevQuestions {
   return {
     [`call_${call.id}`]: {
       type: 'noul',
       instructions: `Tool call ${call.id} (${call.tool}) should stay in the history: knowing this call was made, with its input, still matters for what the assistant does next`,
+      ...(criteria ? { criteria: CALL_CRITERIA } : {}),
     },
     [`result_${call.id}`]: {
       type: 'noul',
       instructions: `The full output of tool call ${call.id} (${call.tool}, ${call.resultChars} chars) should stay in the history verbatim: the assistant still needs its contents and re-running the tool would not do`,
+      ...(criteria ? { criteria: RESULT_CRITERIA } : {}),
     },
   };
 }
+
+/**
+ * The two sides of each question, from tamaratran/fast-jev-compaction#55:
+ * Jev's docs ask for `true`/`false` criteria whenever the boundary is subtle.
+ */
+const CALL_CRITERIA = {
+  true: 'The call records a change to the world, or a constraint the assistant must not violate again: an edit or write that changed a file, a command that installed, moved or deleted something, a check whose outcome the user was told about',
+  false: 'The call only gathered information that has since been superseded or acted upon: a search used to locate a file that was then edited, a read of a file that has since changed, a failing check that has since been fixed',
+};
+const RESULT_CRITERIA = {
+  true: 'The exact contents are still in use and could not be recovered by re-running the tool: an error the assistant is still diagnosing, output the user asked about, the current state of a file being edited',
+  false: 'The contents are stale, already stated in the assistant text, or trivially re-obtainable: a directory listing already used, a passing test run, a file read before it was rewritten',
+};
 
 /**
  * Splits the candidate calls into batches whose questions, together with the
@@ -170,14 +189,14 @@ export function questionsFor(call: ToolCall): JevQuestions {
 export function batchCalls(
   calls: readonly ToolCall[],
   stateTokens: number,
-  options: Pick<ResolvedCompactOptions, 'maxRequestTokens'>,
+  options: Pick<ResolvedCompactOptions, 'maxRequestTokens'> & { questionCriteria?: boolean },
 ): ToolCall[][] {
   const budget = options.maxRequestTokens - stateTokens - REQUEST_OVERHEAD_TOKENS;
   const batches: ToolCall[][] = [];
   let current: ToolCall[] = [];
   let currentTokens = 0;
   for (const call of calls) {
-    const tokens = estimateTokens(JSON.stringify(questionsFor(call)));
+    const tokens = estimateTokens(JSON.stringify(questionsFor(call, options.questionCriteria)));
     if (current.length > 0 && currentTokens + tokens > budget) {
       batches.push(current);
       current = [];
@@ -307,8 +326,9 @@ async function askBatch(
   asker: JevAsker,
   state: CompactionState,
   batch: readonly ToolCall[],
+  criteria = false,
 ): Promise<Map<string, CallAnswer>> {
-  const questions: JevQuestions = Object.assign({}, ...batch.map(questionsFor));
+  const questions: JevQuestions = Object.assign({}, ...batch.map((call) => questionsFor(call, criteria)));
   const { answers } = await asker.ask(state, questions);
   return new Map(
     batch.map((call) => [
@@ -340,7 +360,7 @@ export class CompactionInterrupted extends Error {
  */
 async function askAll(
   asker: JevAsker,
-  jobs: readonly { state: CompactionState; batch: readonly ToolCall[] }[],
+  jobs: readonly { state: CompactionState; batch: readonly ToolCall[]; criteria?: boolean }[],
   limit: number,
   sleep: (ms: number) => Promise<void>,
   signal?: AbortSignal,
@@ -351,13 +371,13 @@ async function askAll(
   let next = 0;
   const ask = async (job: (typeof jobs)[number]) => {
     try {
-      return await askBatch(asker, job.state, job.batch);
+      return await askBatch(asker, job.state, job.batch, job.criteria);
     } catch (error) {
       if (!isRetryable(error)) throw error;
       await sleep(RETRY_DELAY_MS);
       if (signal?.aborted) throw new CompactionInterrupted();
       if (stop !== undefined) throw stop;
-      return askBatch(asker, job.state, job.batch);
+      return askBatch(asker, job.state, job.batch, job.criteria);
     }
   };
   const worker = async (): Promise<void> => {
@@ -380,6 +400,52 @@ async function askAll(
   };
   await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));
   return { answers, failures };
+}
+
+/** A cut result: the head it kept, then its note (`[jetcompact truncated N chars …]`). */
+const CUT_RESULT = new RegExp(`^([\\s\\S]*?)\\n?\\[${PLUGIN_ID} truncated (\\d+) chars of this tool result([^\\n]*)\\]$`);
+
+/**
+ * `ageCutResults`: every result that came in already cut by an earlier
+ * compaction, and is not pinned, loses its head; the note, with the count
+ * raised by the head's length, is all that stays.
+ */
+function ageCutResults(
+  before: readonly Message[],
+  after: Message[],
+  calls: readonly ToolCall[],
+): { messages: Message[]; count: number } {
+  const pinned = new Set(calls.filter((call) => call.pinned).map((call) => call.tool_use_id));
+  const cutBefore = new Set<string>();
+  for (const message of before) {
+    for (const result of message.toolResults ?? []) {
+      if (!pinned.has(result.tool_use_id) && CUT_RESULT.test(result.text)) cutBefore.add(result.tool_use_id);
+    }
+  }
+  if (cutBefore.size === 0) return { messages: after, count: 0 };
+  const aged = new Set<string>();
+  const age = (id: string, text: string): string => {
+    if (!cutBefore.has(id)) return text;
+    const match = CUT_RESULT.exec(text);
+    if (!match || match[1] === '') return text;
+    aged.add(id);
+    return `[${PLUGIN_ID} truncated ${Number(match[2]) + match[1]!.length} chars of this tool result${match[3]}]`;
+  };
+  const messages = after.map((message) => {
+    const toolUses = message.toolUses.map((tool) => {
+      const text = age(tool.tool_use_id, tool.text ?? '');
+      return text === (tool.text ?? '') ? tool : { ...tool, text };
+    });
+    const toolResults = message.toolResults?.map((result) => {
+      const text = age(result.tool_use_id, result.text);
+      return text === result.text ? result : { ...result, text };
+    });
+    const changed =
+      toolUses.some((tool, i) => tool !== message.toolUses[i]) ||
+      (toolResults ?? []).some((result, i) => result !== message.toolResults?.[i]);
+    return changed ? { ...message, toolUses, ...(toolResults ? { toolResults } : {}) } : message;
+  });
+  return { messages, count: aged.size };
 }
 
 /** How a cut note says to get the rest: the recall tool by id, or running the tool again. */
@@ -635,7 +701,7 @@ export async function compact(
     const { groups, stage } = stateGroups(messages, calls, candidates, { ...resolved, goal });
     fitted = { tokens: Math.max(0, ...groups.map((group) => group.state.tokens)), stage };
     const jobs = groups.flatMap((group) =>
-      batchCalls(group.calls, group.state.tokens, resolved).map((batch) => ({ state: group.state.state, batch })),
+      batchCalls(group.calls, group.state.tokens, resolved).map((batch) => ({ state: group.state.state, batch, criteria: resolved.questionCriteria })),
     );
     requests = jobs.length;
     // Without a host clock the one retry goes out at once.
@@ -667,13 +733,15 @@ export async function compact(
       : calls.map((call) =>
           decideCall(call, answers.get(call.id) ?? { keepCall: 1, keepResult: 1 }, resolved),
         );
-  const kept = applyDecisions(
+  const applied = applyDecisions(
     messages,
     decisions,
     calls,
     resolved.truncateHeadChars,
     resolved.recallNotes,
   );
+  const aged = resolved.ageCutResults ? ageCutResults(messages, applied, calls) : { messages: applied, count: 0 };
+  const kept = aged.messages;
   const cut = {
     resultsDropped: count(decisions, 'result_dropped'),
     callsDropped: count(decisions, 'call_dropped'),
@@ -700,6 +768,7 @@ export async function compact(
       resultsDropped: cut.resultsDropped,
       callsDropped: cut.callsDropped,
       callsStubbed: cut.callsStubbed,
+      resultsAged: aged.count,
       pinned: count(decisions, 'pinned'),
       hostTextTrimmed: host.trimmed,
       hostCharsTrimmed: host.charsCut,

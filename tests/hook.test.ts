@@ -149,6 +149,11 @@ describe('hook config', () => {
       targetPercent: 30,
       keepResultTokens: 5,
     });
+    expect(resolveHookConfig({ ageCutResults: true, questionCriteria: true })).toMatchObject({
+      ageCutResults: true,
+      questionCriteria: true,
+    });
+    expect(resolveHookConfig({ ageCutResults: 'yes' })).not.toHaveProperty('ageCutResults');
     expect(resolveHookConfig({ keepMode: 'bogus' })).not.toHaveProperty('keepMode');
     expect(resolveHookConfig({ builtinFallback: 'never' }).builtinFallback).toBe('never');
     expect(resolveHookConfig({ builtinFallback: 'always' }).builtinFallback).toBe('always');

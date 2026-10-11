@@ -159,6 +159,17 @@ export interface CompactOptions {
   oldProse?: OldProseMode;
   /** User turns kept outside `oldProse` condensing. Default 8. */
   recentTurns?: number;
+  /**
+   * A result an earlier compaction already cut to a head loses that head too:
+   * only its cut note stays, and recall (or running the tool again) returns
+   * it. Pinned results are never aged. Default false.
+   */
+  ageCutResults?: boolean;
+  /**
+   * Gives each Jev question `true`/`false` criteria describing what a call or
+   * result worth keeping looks like. Default false.
+   */
+  questionCriteria?: boolean;
 }
 
 export interface ResolvedCompactOptions {
@@ -180,6 +191,8 @@ export interface ResolvedCompactOptions {
   taskResultHeadChars: number;
   oldProse: OldProseMode;
   recentTurns: number;
+  ageCutResults: boolean;
+  questionCriteria: boolean;
 }
 
 export interface CompactResult {
@@ -196,6 +209,8 @@ export interface CompactResult {
     resultsDropped: number;
     callsDropped: number;
     callsStubbed: number;
+    /** Results an earlier compaction cut to a head, reduced to their cut note (`ageCutResults`). */
+    resultsAged: number;
     pinned: number;
     /** Messages whose host blocks were trimmed, and the characters that removed. */
     hostTextTrimmed: number;
