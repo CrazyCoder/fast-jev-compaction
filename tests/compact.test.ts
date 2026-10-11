@@ -459,6 +459,17 @@ describe('decisions', () => {
     const aligned = `${'x'.repeat(298)}${emoji.repeat(200)}`;
     expect(truncated(aligned)).toBe(`${'x'.repeat(298)}${emoji}\n${note(aligned.length - 300)}`);
   });
+
+  it("never cuts the head of a stubbed call's input inside a surrogate pair", () => {
+    const messages = transcript();
+    // {"command":" is 12 characters, so the emoji sits at 299-300 of the JSON.
+    messages[1]!.toolUses[0]!.input = { command: `${'x'.repeat(287)}${'\u{1F600}'.repeat(100)}` };
+    const calls = collectToolCalls(messages, 0);
+    const decisions = [decideCall(calls[0]!, { keepCall: 0.1, keepResult: 0.1 }, { keepThreshold: 0.5, dropCalls: false })];
+    expect(decisions[0]!.action).toBe('stub_call');
+    const head = String(applyDecisions(messages, decisions, calls, 300)[1]?.toolUses[0]?.input['input_head']);
+    expect(head).toBe(`{"command":"${'x'.repeat(287)}`);
+  });
 });
 
 describe('rank decisions', () => {

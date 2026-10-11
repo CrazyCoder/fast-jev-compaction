@@ -10,6 +10,7 @@ import {
   goalFromMessages,
   isPinned,
   MAX_INSTRUCTION_CHARS,
+  sliceSurrogateSafe,
   truncate,
 } from './state.js';
 import type {
@@ -369,13 +370,6 @@ async function askAll(
   return { answers, failures };
 }
 
-/** Whether ending `text` at `index` would separate the two halves of a surrogate pair. */
-function splitsSurrogatePair(text: string, index: number): boolean {
-  const before = text.charCodeAt(index - 1);
-  const after = text.charCodeAt(index);
-  return before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
-}
-
 /** How a cut note says to get the rest: the recall tool by id, or running the tool again. */
 function restOf(id: string, recall: boolean, fallback: string): string {
   return recall ? `; full text: recall expand ["${id}"]` : fallback;
@@ -385,7 +379,7 @@ function truncatedResultText(text: string, isError: boolean, headChars: number, 
   if (text.length <= headChars + 120) return text;
   // End the head on a code point boundary: cutting a surrogate pair in half
   // would leave a lone surrogate in the rebuilt transcript.
-  const cut = splitsSurrogatePair(text, headChars) ? headChars - 1 : headChars;
+  const cut = sliceSurrogateSafe(text, 0, headChars).length;
   const head = cut > 0 ? `${text.slice(0, cut)}\n` : '';
   return `${head}[${PLUGIN_ID} truncated ${text.length - cut} chars of this tool result${
     isError ? ' (error)' : ''
@@ -396,7 +390,7 @@ function truncatedInput(input: Record<string, unknown>, headChars: number, id: s
   const json = JSON.stringify(input);
   if (json.length <= headChars + 120) return input;
   return {
-    input_head: json.slice(0, headChars),
+    input_head: sliceSurrogateSafe(json, 0, headChars),
     note: marker(`truncated ${json.length - headChars} chars of this tool input${restOf(id, recall, '')}`),
   };
 }
