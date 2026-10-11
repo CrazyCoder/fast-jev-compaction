@@ -734,6 +734,41 @@ describe('a Jev error status', () => {
   });
 });
 
+describe('an automatic compaction above targetPercent', () => {
+  // Full, and 60% of it is tools and system prompt: no cut gets under 45%.
+  const breakdown = {
+    percentage: 100,
+    totalTokens: 100_000,
+    categories: [
+      { name: 'System tools', tokens: 60_000, kind: 'used' },
+      { name: 'Messages', tokens: 40_000, kind: 'used' },
+    ],
+  };
+  async function run(options: Record<string, unknown>) {
+    const { $, notices } = host(jevFetch(() => 0.1));
+    const full = { ...$, session: { usage: async () => ({ context: { percent: 50, breakdown } }) } };
+    let delegated = false;
+    const next = async () => ((delegated = true), CORE);
+    const out = await hooks({ preserveRecentMessages: 1, keepMode: 'threshold', dropCalls: true, ...options })[
+      'session.compact'
+    ]!(full, { trigger: 'auto', messages: transcript() }, next);
+    return { out, delegated, notice: notices.at(-1) };
+  }
+
+  it('keeps its own result when that frees minReductionRatio', async () => {
+    const { out, delegated, notice } = await run({});
+    expect(delegated).toBe(false);
+    expect(out).toHaveProperty('messages');
+    expect(notice).toMatch(/above the 45% target, since it frees at least 25%/);
+  });
+
+  it('falls back to the built-in summary when it frees less', async () => {
+    const { out, delegated } = await run({ minReductionRatio: 0.99 });
+    expect(delegated).toBe(true);
+    expect(out).toBe(CORE);
+  });
+});
+
 describe('a built-in summary that fails', () => {
   it('installs the hook\'s own smaller result instead', async () => {
     const options = { keepMode: 'threshold', minReductionRatio: 0.99 };

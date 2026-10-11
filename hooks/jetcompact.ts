@@ -851,13 +851,16 @@ export const register: Register = (on: On, options: PluginOptions) => {
     // Every await can outlast Claude Code's patience: look again right before
     // a result goes back.
     const handBack = (messages: SessionMessage[]) => (next.signal?.aborted ? interrupted() : { messages });
-    // The guards keep automatic compactions from running back to back; a
-    // /compact the person typed is applied whenever it frees anything.
+    // A /compact the person typed is applied whenever it frees anything. An
+    // automatic one that frees minReductionRatio but stays above targetPercent
+    // is applied too: the built-in summary would cost the speed and the
+    // context JetCompact keeps (docs/evals.md, repeated compaction).
     const installBest = async (why: string, chosen: NonNullable<typeof best>) => {
+      const since = typed ? 'since /compact was typed' : `since it frees at least ${percent(configured.minReductionRatio)}`;
       await notify(
         $,
         trigger,
-        `kept the smallest result although ${why}, since /compact was typed (${chosen.detail})`,
+        `kept the smallest result although ${why}, ${since} (${chosen.detail})`,
         `compacted, ${percent(chosen.ratio)} smaller`,
       );
       return handBack(chosen.messages);
@@ -1007,7 +1010,9 @@ export const register: Register = (on: On, options: PluginOptions) => {
         }
         refusal = `${refusedBecause}: ${summarize(measured)}${hiddenNote}`;
       }
-      if (typed && best) return installBest(afterVerbatim(refusedBecause), best);
+      if (best && (typed || best.ratio >= config.minReductionRatio)) {
+        return installBest(afterVerbatim(refusedBecause), best);
+      }
       return giveUp(afterVerbatim(refusal));
     } catch (error) {
       if (next.signal?.aborted) return interrupted();
