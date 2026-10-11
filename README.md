@@ -19,6 +19,31 @@ JetCompact is a fork of
 combines the most useful work from that project's many forks with its own; the
 full lineage is under [Features and credits](#features-and-credits).
 
+## Why this fork
+
+I used [pi-vcc](https://github.com/sting8k/pi-vcc) in Pi for some time and liked
+how fast its compaction is compared to the stock summary. Speed was the main
+factor for me. Then Jev was released, and I saw
+[Theo's post](https://x.com/theo/status/2100762304862384257) and the debate over
+it. Then I found fast-jev-compaction and decided to try it. It had many issues,
+and the author stopped merging fixes, so I forked it to fix them. On the way the
+project turned into an experiment, with [evals](docs/evals.md) against Claude
+Code's built-in summary. Try it, and send feedback and suggestions as issues.
+
+### Questions from Theo's post
+
+Theo's post is about the original fast-jev-compaction. Other users may have the
+same questions, so here is how JetCompact answers them.
+
+| Concern | JetCompact |
+| -- | -- |
+| Compaction should be rare, not a constant filter. | It runs only when Claude Code would compact anyway: at `compactAtPercent` of the compaction window, or on `/compact`. |
+| The decision model decides per tool call without seeing the output, so the agent loses what it needs and loops. | A cut result keeps its first few hundred characters, the transcript is never deleted, and the `recall` tool returns the full output by its id. After each compaction, the model gets a note that says what was cut and tells it to use `recall` before it runs a tool again. In the evals the model re-read 0.8 files per run after a compaction, against 2.1 with the built-in summary. |
+| The output is "deleted permanently", so the agent must re-run the tool. | That is the original's README. JetCompact deletes nothing from the transcript, and `recall` reads it back. |
+| Reasoning traces are lost. | Every compaction loses them: the built-in summary replaces the whole history, reasoning included. JetCompact keeps the prompts, the replies and the kept tool output word for word. |
+| Models are trained on their own compaction summary. | Not measured directly. In the evals every arm finished every task, so these tasks do not separate the two on success. |
+| Editing history invalidates the prompt cache. | Every compaction rewrites the cache, the built-in one too. The trade-off of JetCompact is that it keeps more context, so later turns read more from the cache and the next compaction comes sooner. `targetPercent` caps what a compaction keeps. In the evals, sessions that compacted once cost 13% less, and sessions that compacted several times in a small window cost the same. |
+
 ## Added in JetCompact
 
 | Feature | What it does | Origin |
@@ -38,6 +63,8 @@ full lineage is under [Features and credits](#features-and-credits).
 | Typed `/compact` applies | A `/compact` you type is applied whenever it frees anything; the size guards hold back only automatic compactions | ferrisworks (bd4a01d) |
 | Stops when Claude Code moves on | Esc or another hook settling first abandons the in-flight request; nothing is returned or delegated | k-metehan (18f69f8, 0f4ca22) |
 | Own result when the summary fails | If Claude Code's built-in summary fails after a fallback, JetCompact installs its own result when that freed anything | deadczarvc (a45402e) |
+| Compaction window | `compactAtPercent` and `targetPercent` count against the window Claude Code compacts at (`CLAUDE_CODE_AUTO_COMPACT_WINDOW` or a setting), not the model's whole window, so the plugin compacts at your setting and on 1M-token models | JetCompact |
+| Evals | A/B runs against the built-in summary on graded coding tasks, with a cost model; see [Evals](docs/evals.md) and [jetcompact-eval](https://github.com/CrazyCoder/jetcompact-eval) | JetCompact |
 | Claude Code 2.1.292 types | `$.model.complete` returns an object since 2.1.292, which had silently broken `oldProse: summarize` | JetCompact |
 
 k-metehan is
@@ -346,14 +373,14 @@ JetCompact adds is listed under [Added in JetCompact](#added-in-jetcompact).
 | -- | -- | -- | -- | -- |
 | Tool calls kept | Absolute 0.5 threshold | Same | Rank within token budgets | Same |
 | Dropped calls | Deleted | Stub note | Stub note | Stub note |
-| Size guard | Min 25% reduction | Same | Same + `targetPercent` | Same, hidden content counted |
+| Size guard | Min 25% reduction | Same | Same + `targetPercent` | Same, hidden content counted, measured against the compaction window |
 | Built-in fallback | Always | Automatic compactions only | Same | Same |
 | Secret redaction | No | Yes | Yes | Yes |
 | Host notices / old prose | Kept | Kept | Trimmed / optional digest | Trimmed / digest when verbatim is refused |
 | Transcript output | Decision dump | Same | Same | One toast; debug log and log file |
 | Hidden content after compaction | Kept on untouched rows (`--resume` reloads the old history) | Lost (no handles) | Lost | Folded back as text |
 | Failed Jev request | Whole compaction falls back | Same | Same | Its calls kept, rest applied |
-| Decision provider | Jev | Jev (any System One endpoint) | Same | Same + OpenAI Decisions |
+| Decision provider | Jev | Jev (any System One endpoint) | Same | Same + OpenAI Decisions, or rules with no model |
 | What was cut | Gone from the conversation | Same | Same | `recall` tool reads it back from the transcript |
 | Model told what was cut | No | No | No | Cut notes, digest header and one note per compaction point at recall |
 | Past sessions | No | No | No | Searched by keyword, optionally through a qmd index |
@@ -364,6 +391,11 @@ Roadmap: fact salvage on dropped calls (upstream issues
 [#105](https://github.com/tamaratran/fast-jev-compaction/issues/105)).
 
 ## Measuring
+
+[jetcompact-eval](https://github.com/CrazyCoder/jetcompact-eval) runs the same
+coding tasks headless with the built-in summary and with JetCompact, grades them
+by hidden tests, and measures cost, re-reads after a compaction and compaction
+time. The results are in [Evals](docs/evals.md).
 
 `tools/replay` replays recorded sessions offline under different policies and
 reports reduction, post-compaction floor, growth per compaction and a
