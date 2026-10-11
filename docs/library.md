@@ -86,6 +86,12 @@ engine handle lose; see [hooks/README.md](../hooks/README.md).
 | `oldProse` | `keep` | `digest` replaces everything before the last `recentTurns` user turns with a deterministic digest (first prompt, per-turn prompt head and final reply head, tool names, referenced paths and ids); `summarize` with a model-written summary (plugin: `proseModel`, falls back to the digest; the library needs a `summarize` callback in `compact`'s fourth argument). An earlier digest or summary is folded, not chained |
 | `recentTurns` | `8` | User turns kept outside `oldProse` condensing |
 | `taskResultHeadChars` | `4000` | Characters of a `<task-notification>`'s `<result>` (a subagent's final report) retained; its `task-id`, `status`, `summary`, `output-file` and `tool-use-id` always stay whole; `0` trims it like any host block |
+| `ageCutResults` | `false` | A result an earlier compaction cut to a head loses the head at this compaction; only its cut note stays (recall returns the full text). Pinned results are never aged. `stats.resultsAged` counts them |
+| `questionCriteria` | `false` | Each question gets `true`/`false` criteria for what a call or result worth keeping looks like (changes made, errors still being diagnosed) and what is safe to cut (superseded reads, passing runs) |
+| `decider` | `model` | `algorithmic` scores every candidate from the transcript alone (`algorithmicAnswers(candidates, calls)`) and makes no request: recency, superseded reads and repeated calls near 0, resolved errors low, open errors kept, search output lower, test and build output higher. Rank and threshold modes apply unchanged |
+
+`compact`'s fourth argument also takes `signal`: when it aborts, no new request,
+retry or wait starts, and `compact` throws `CompactionInterrupted`.
 
 Plugin-only options (set as plugin options, see
 [`hooks/README.md`](../hooks/README.md)): `compactAtPercent` (60),

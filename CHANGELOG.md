@@ -3,6 +3,38 @@
 All notable changes to this fork are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `provider: "algorithmic"` (library `decider: 'algorithmic'`): compaction with
+  no decision model and no key. Calls are scored from the transcript alone,
+  after pi-vcc's ranking and pi-blackhole's error tracking: superseded reads,
+  repeated calls and older todo lists near 0, resolved errors low, open errors
+  kept, search output lower, test and build output higher.
+- `ageCutResults` (default off): a result an earlier compaction cut to a head
+  keeps only its cut note at the next compaction.
+- `questionCriteria` (default off): each decision question gets true/false
+  criteria for what is worth keeping.
+
+### Changed
+
+- A `/compact` you type is applied whenever it frees anything; the size guards
+  hold back only automatic compactions. The `/compact` the plugin queues in a
+  headless session carries `automatic, from jetcompact` and stays automatic.
+  (ferrisworks bd4a01d)
+- When Claude Code moves on (Esc, the hook's time budget, another hook settling
+  first), the in-flight request is abandoned and nothing is returned or
+  delegated. A result Claude Code refuses is logged. (k-metehan 18f69f8,
+  0f4ca22)
+- When the built-in summary fails after a fallback, the plugin installs its own
+  result if that freed anything. (deadczarvc a45402e)
+
+### Fixed
+
+- A stubbed call's input is cut on a code point boundary, so an emoji is never
+  split. (k-metehan 11bd2be)
+
 ## [0.10.0]
 
 First release of JetCompact, a fork of fast-jev-compaction based on

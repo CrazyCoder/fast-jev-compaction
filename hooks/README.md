@@ -55,7 +55,7 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 
 | Option | Default |
 | -- | -: |
-| `provider` | `jev` (`openai`) |
+| `provider` | `jev` (`openai`, `algorithmic`) |
 | `recall` | `true` |
 | `sessionIndex` | `auto` (`off`) |
 | `model` | `jev-latest` (`gpt-6-luna` with `openai`) |
@@ -74,6 +74,8 @@ The plugin declares these `userConfig` values in `.claude-plugin/plugin.json`:
 | `maxConcurrentRequests` | `4` |
 | `truncateHeadChars` | `300`, `100` once old prose is digested |
 | `dropCalls` | `false` |
+| `ageCutResults` | `false` |
+| `questionCriteria` | `false` |
 | `trimHostText` | `true` |
 | `hostTextHeadChars` | `200` |
 | `oldProse` | unset: `keep`, then `digest` (`summarize`) |
@@ -98,6 +100,17 @@ TypeSafe key or a Jev gateway never receives an OpenAI request. A refusal keeps
 the call. Luna's probabilities are on a different scale from Jev's, so
 `keepThreshold` and the rank budgets may need retuning.
 
+`provider: "algorithmic"` asks no model and needs no key. Each older call is
+scored from the transcript alone, after the ranking in
+[pi-vcc](https://github.com/sting8k/pi-vcc) and the error tracking in
+[pi-blackhole](https://github.com/k0valik/pi-blackhole): recency; a Read of a
+file a later edit changed, a call repeated later with the same input, and an
+older TodoWrite score near 0; an error a later call resolved scores low, one
+still open keeps its result; search output halves, test and build output gains;
+state-changing git and gh calls keep their call. The same rank budgets then
+decide what stays whole, so the rest of the plugin (cut notes, recall, the
+digest, the guards) works as with a model.
+
 `baseUrl` is unset by default, which reaches
 `https://api.typesafe.ai/v1/systemone` as before. Set it to
 `https://openrouter.ai/api/alpha/decisions` with `model` left at `jev-latest` to
@@ -109,26 +122,39 @@ Every option except `apiKey`, `baseUrl`, `envFile`, `compactAtPercent`,
 `minReductionRatio`, `compactionTimeoutMs`, `builtinFallback`, `targetPercent`
 and `model` is passed straight to the library; see
 [docs/library.md](../docs/library.md#options) for what they do. The
-`session.compact` hook runs the Jev requests concurrently. If Jev fails, the
-response is malformed, the key is unavailable, the history cannot be fitted into
-the state budget, or the estimated reduction is below `minReductionRatio`, what
-happens next depends on the compaction's `trigger`. With `builtinFallback` at
-`auto`, only Claude Code's own compaction (`auto`: its threshold, or a prompt
-too long, when the conversation has to shrink) logs a fallback and delegates to
-Claude Code's built-in compaction; `/compact` (`manual`), a plugin's request
-(`plugin`, including this plugin's `turn.complete` one) and `precompute` answer
-`{ skip }` instead, so the conversation stays as it is and Claude Code shows
-why. `always` delegates on every trigger, as the plugin did before the option
-existed; `never` on none. The outcome is shown as a one-line toast. The debug
-log (`$.ui.log` with `to: 'debug'`, nothing in the transcript) gets the
-reduction, per-reason counts, state size and request count, and a per-call
-`decisions:` line with both probabilities for diagnosis. The debug log exists
-only under `claude --debug`, so each outcome is also appended as one timestamped
-line, labelled with the trigger, to `~/.claude/jetcompact/compactions.log`
-(under `CLAUDE_CONFIG_DIR` when set; the newest 200 lines are kept), together
-with each `/compact` the hook queues in a headless session. Text typed after
-`/compact` goes into Jev's goal as what the user asked the compaction to keep
-(the first 2000 characters).
+`session.compact` hook runs the Jev requests concurrently.
+
+The size guards (`minReductionRatio`, `targetPercent`) exist to keep automatic
+compactions from running back to back, so a `/compact` the person typed is
+applied whenever it frees anything: the attempt that freed the most is
+installed, even when a later attempt fails. The `/compact` this plugin queues in
+a headless session carries the args `automatic, from jetcompact`, which mark it
+as automatic: the guards apply, and the marker is not passed to Jev or the
+built-in summarizer as an instruction.
+
+If Jev fails, the response is malformed, the key is unavailable, the history
+cannot be fitted into the state budget, or an automatic compaction is refused by
+the guards, what happens next depends on the compaction's `trigger`. With
+`builtinFallback` at `auto`, only Claude Code's own compaction (`auto`: its
+threshold, or a prompt too long, when the conversation has to shrink) and the
+plugin's queued one log a fallback and delegate to Claude Code's built-in
+compaction; `/compact` (`manual`), another plugin's request (`plugin`) and
+`precompute` answer `{ skip }` instead, so the conversation stays as it is and
+Claude Code shows why. `always` delegates on every trigger; `never` on none.
+When the built-in summary itself fails, the hook installs its own result if that
+freed anything. When Claude Code moves on (Esc, the hook's time budget, another
+hook settling first), the in-flight request is abandoned and nothing is returned
+or delegated. A result Claude Code refuses is logged, and the built-in summary
+runs only where `builtinFallback` allows it. The outcome is shown as a one-line
+toast. The debug log (`$.ui.log` with `to: 'debug'`, nothing in the transcript)
+gets the reduction, per-reason counts, state size and request count, and a
+per-call `decisions:` line with both probabilities for diagnosis. The debug log
+exists only under `claude --debug`, so each outcome is also appended as one
+timestamped line, labelled with the trigger, to
+`~/.claude/jetcompact/compactions.log` (under `CLAUDE_CONFIG_DIR` when set; the
+newest 200 lines are kept), together with each `/compact` the hook queues in a
+headless session. Text typed after `/compact` goes into Jev's goal as what the
+user asked the compaction to keep (the first 2000 characters).
 
 Kept messages go back without their engine handle, so `--resume` starts at the
 compaction (#89). A message without its handle loses the hidden entries Claude

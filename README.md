@@ -108,7 +108,8 @@ people touch:
 | `minReductionRatio` | `0.25` | Minimum estimated reduction required to replace the history |
 | `keepMode` | `rank` | `rank` keeps the best-scored calls within `keepResultTokens` / `keepCallTokens`; `threshold` uses `keepThreshold` |
 | `preserveRecentMessages` | `6` | Newest messages never touched |
-| `provider` | `jev` | Who scores the calls: `jev` (TypeSafe Jev) or `openai` ([OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions), `gpt-6-luna`, key from `OPENAI_API_KEY`). Luna's probabilities are on a different scale from Jev's, so `keepThreshold` and the rank budgets may need retuning |
+| `provider` | `jev` | Who scores the calls: `jev` (TypeSafe Jev), `openai` ([OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions), `gpt-6-luna`, key from `OPENAI_API_KEY`), or `algorithmic` (no model and no key: rules after pi-vcc and pi-blackhole, see [hooks/README.md](hooks/README.md#configuration)). Luna's probabilities are on a different scale from Jev's, so `keepThreshold` and the rank budgets may need retuning |
+| `ageCutResults` | `false` | A result already cut by an earlier compaction keeps only its cut note at the next one |
 
 To score with OpenAI's Decisions API instead of Jev, set `provider` and give the
 key through `OPENAI_API_KEY` in the environment, in the settings' `env` block,
