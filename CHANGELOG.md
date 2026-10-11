@@ -3,10 +3,13 @@
 All notable changes to this fork are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.11.0]
 
 ### Added
 
+- [Evals](docs/evals.md): A/B runs against Claude Code's built-in summary on
+  nine coding tasks, with a cost model of compacting harder or lighter. The
+  harness is [jetcompact-eval](https://github.com/CrazyCoder/jetcompact-eval).
 - `provider: "algorithmic"` (library `decider: 'algorithmic'`): compaction with
   no decision model and no key. Calls are scored from the transcript alone,
   after pi-vcc's ranking and pi-blackhole's error tracking: superseded reads,
@@ -20,9 +23,9 @@ All notable changes to this fork are documented here. The format follows
 ### Changed
 
 - Before an automatic compaction falls back to the built-in summary, a harder
-  cut is tried: results an earlier compaction cut keep only their note, the keep
-  budgets halve and heads shrink to 100 characters. Identical Jev requests
-  within one compaction are sent once.
+  cut is tried: the keep budgets halve and heads shrink to 100 characters.
+  Identical Jev requests within one compaction are sent once; an error status is
+  asked again.
 - Once a session holds a cut from an earlier compaction, every compaction cuts
   that hard from its first attempt, so a long session keeps less context per
   compaction and compacts less often. The first compaction stays light.
@@ -30,10 +33,11 @@ All notable changes to this fork are documented here. The format follows
   hold back only automatic compactions. The `/compact` the plugin queues in a
   headless session carries `automatic, from jetcompact` and stays automatic.
   (ferrisworks bd4a01d)
-- When Claude Code moves on (Esc, the hook's time budget, another hook settling
-  first), the in-flight request is abandoned and nothing is returned or
-  delegated. A result Claude Code refuses is logged. (k-metehan 18f69f8,
-  0f4ca22)
+- When Claude Code moves on (Esc, another hook settling first), the in-flight
+  request is abandoned and nothing is returned or delegated. When the hook runs
+  over Claude Code's time budget, or Claude Code refuses its result, that is
+  logged and the built-in summary runs where `builtinFallback` allows it.
+  (k-metehan 18f69f8, 0f4ca22)
 - When the built-in summary fails after a fallback, the plugin installs its own
   result if that freed anything. (deadczarvc a45402e)
 
