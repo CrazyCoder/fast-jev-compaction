@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   compactSession,
+  contextFill,
   decisionLog,
   decisionLogLines,
   dotenvKey,
@@ -300,6 +301,33 @@ describe('post-compaction target', () => {
     expect(exceedsTarget(estimatePostCompactPercent(90, stats), 45)).toBe(false);
     expect(exceedsTarget(estimatePostCompactPercent(undefined, stats), 45)).toBe(false);
     expect(estimatePostCompactPercent(80, { charsBefore: 0, charsAfter: 0 })).toBeUndefined();
+  });
+
+  it('keeps the share that is not messages out of the shrink', () => {
+    // 60% full, a quarter of it system prompt and tools: halving the messages
+    // leaves 60 * (0.25 + 0.75 / 2) = 37.5%, not 30%.
+    expect(estimatePostCompactPercent({ percent: 60, fixedShare: 0.25 }, stats)).toBe(37.5);
+  });
+});
+
+describe('context fill', () => {
+  const usage = (context: unknown) => ({ session: { usage: vi.fn(async () => ({ context })) } }) as never;
+  const categories = [
+    { name: 'System prompt', tokens: 10_000, kind: 'used' },
+    { name: 'Messages', tokens: 30_000, kind: 'used' },
+    { name: 'Free space', tokens: 50_000, kind: 'free' },
+    { name: 'MCP tools', tokens: 5_000, kind: 'deferred' },
+  ];
+
+  it('measures against the compaction window, not the model window', async () => {
+    // 40k used of a 100k compaction window on a 200k model: 40%, not 20%.
+    const host = usage({ percent: 20, breakdown: { percentage: 40, totalTokens: 40_000, categories } });
+    expect(await contextFill(host)).toEqual({ percent: 40, fixedShare: 0.25 });
+    expect((host as any).session.usage).toHaveBeenCalledWith({ breakdown: 'summary' });
+  });
+
+  it('falls back to the model-window percent without a breakdown', async () => {
+    expect(await contextFill(usage({ percent: 20 }))).toEqual({ percent: 20 });
   });
 });
 
@@ -804,7 +832,7 @@ describe('turn.complete request', () => {
 });
 
 describe('auto-compaction at compactAtPercent', () => {
-  function turnEnd(compact: () => Promise<unknown>) {
+  function turnEnd(compact: () => Promise<unknown>, context: unknown = { percent: 80 }) {
     const hooks: Record<string, (...args: any[]) => Promise<any>> = {};
     register(((name: string, hook: any) => {
       hooks[name] = hook;
@@ -813,7 +841,7 @@ describe('auto-compaction at compactAtPercent', () => {
     const commands: string[] = [];
     const log: string[] = [];
     const $ = {
-      session: { usage: async () => ({ context: { percent: 80 } }), compact },
+      session: { usage: async () => ({ context }), compact },
       command: { run: async (input: { command: string }) => (commands.push(input.command), { text: '' }) },
       ui: { log: (text: string) => log.push(text) },
       env: { get: async () => undefined },
@@ -821,6 +849,14 @@ describe('auto-compaction at compactAtPercent', () => {
     const run = () => hooks['turn.complete']!($, { reason: 'answer' }, async () => ({ text: 'answer' }));
     return { run, commands, log };
   }
+
+  it('compares compactAtPercent with the compaction window', async () => {
+    // 30% of the model's window, 60% of the window Claude Code compacts at.
+    const compact = vi.fn(async () => ({}));
+    const breakdown = { percentage: 60, totalTokens: 60_000, categories: [] };
+    await turnEnd(compact, { percent: 30, breakdown }).run();
+    expect(compact).toHaveBeenCalledTimes(1);
+  });
 
   it('compacts through $.session.compact where the host has it', async () => {
     let compacted = 0;

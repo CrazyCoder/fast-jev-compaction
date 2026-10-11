@@ -61,7 +61,7 @@
     "compactAtPercent": {
       "type": "number",
       "title": "Compaction percentage",
-      "description": "Context percentage at which turn.complete requests compaction.",
+      "description": "Context percentage at which turn.complete requests compaction, of the window Claude Code compacts at (CLAUDE_CODE_AUTO_COMPACT_WINDOW when set).",
       "default": 60
     },
     "minReductionRatio": {

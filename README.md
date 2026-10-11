@@ -105,7 +105,7 @@ people touch:
 
 | Option | Default | Effect |
 | -- | -- | -- |
-| `compactAtPercent` | `60` | Context percentage at which the plugin asks for a compaction |
+| `compactAtPercent` | `60` | Context percentage at which the plugin asks for a compaction, of the window Claude Code compacts at (`CLAUDE_CODE_AUTO_COMPACT_WINDOW` when set, else the model's) |
 | `oldProse` | unset: [adaptive](#adaptive-prose-digest) | Prose older than `recentTurns` user turns: `keep` verbatim, `digest` (offline, deterministic) or `summarize` (written by `proseModel`). Unset, verbatim until that would be refused, then the digest |
 | `recentTurns` | `8` | User turns kept outside the digest or summary |
 | `builtinFallback` | `auto` | Which compactions fall back to Claude Code's built-in summary when Jev fails or frees too little: `auto` (only its own automatic one), `always`, `never`. Use `always` if Claude Code's own autoCompact is disabled, so `/compact` and plugin requests still get a summary |

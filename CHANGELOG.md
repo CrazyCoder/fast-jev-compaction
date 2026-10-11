@@ -23,6 +23,9 @@ All notable changes to this fork are documented here. The format follows
   cut is tried: results an earlier compaction cut keep only their note, the keep
   budgets halve and heads shrink to 100 characters. Identical Jev requests
   within one compaction are sent once.
+- Once a session holds a cut from an earlier compaction, every compaction cuts
+  that hard from its first attempt, so a long session keeps less context per
+  compaction and compacts less often. The first compaction stays light.
 - A `/compact` you type is applied whenever it frees anything; the size guards
   hold back only automatic compactions. The `/compact` the plugin queues in a
   headless session carries `automatic, from jetcompact` and stays automatic.
@@ -36,6 +39,13 @@ All notable changes to this fork are documented here. The format follows
 
 ### Fixed
 
+- `compactAtPercent` and `targetPercent` count against the window Claude Code
+  compacts at (`CLAUDE_CODE_AUTO_COMPACT_WINDOW` or a setting when set), not the
+  model's whole window. With a smaller compaction window, or on a 1M model, the
+  plugin asked for compaction late and the size target never applied.
+- The estimate of the context after a compaction keeps the system prompt, tools
+  and memory files as they are; it shrank them with the messages, so it came
+  out low.
 - A stubbed call's input is cut on a code point boundary, so an emoji is never
   split. (k-metehan 11bd2be)
 

@@ -175,8 +175,13 @@ these reminders were 102k of 127k folded characters. Checked live on Claude Code
 2.1.296: without the fold a skill body was gone after compaction; with it the
 model still had it.
 
-The `turn.complete` hook requests compaction when `context.percent` reaches
-`compactAtPercent`, with an in-flight guard. When that request is skipped, the
+The `turn.complete` hook requests compaction when the context reaches
+`compactAtPercent` of the window Claude Code compacts at, with an in-flight
+guard. That window is the summary breakdown's `rawMaxTokens`
+(`$.session.usage({ breakdown: 'summary' })`, estimated locally, no request):
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` or a setting when one is set, else the
+model's. `context.percent` alone counts against the model's whole window, so
+on a 1M model, or with a smaller compaction window, it would trigger late. When that request is skipped, the
 hook waits until the context has grown by another 10 percentage points, or
 dropped below `compactAtPercent` again, before it asks again. Headless sessions
 (the desktop app's Code tab, `claude -p`) refuse `$.session.compact`, so there
@@ -186,7 +191,9 @@ shown in those sessions; the outcome is in the compaction log.
 
 `targetPercent` guards against a post-compaction floor that rises each time
 while old prose is kept verbatim. The hook estimates the context percentage
-after compaction (current usage percent times chars after / chars before).
+after compaction, of the same window: the share that is not messages (system
+prompt, tools, memory files) stays, and the messages shrink by chars after /
+chars before.
 
 With `oldProse` unset, a result that falls below `minReductionRatio` or above
 `targetPercent` is computed again with old prose digested and cut results kept

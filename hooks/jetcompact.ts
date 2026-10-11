@@ -479,17 +479,62 @@ export function summarize(result: CompactResult): string {
 }
 
 /**
- * Context percent after compaction, assuming the window shrinks like the
- * transcript's characters. Undefined when usage or the character counts give
- * nothing to scale.
+ * How full the context is, as a percentage of the window Claude Code compacts
+ * at, and the share of it a compaction leaves as it is (system prompt, tools,
+ * memory files: every used row of /context but `Messages`).
+ */
+export interface ContextFill {
+  percent?: number;
+  fixedShare?: number;
+}
+
+type UsageHost = {
+  session: {
+    usage: (args?: { breakdown?: 'summary' }) => Promise<{
+      context: {
+        percent?: number;
+        breakdown?: {
+          percentage: number;
+          totalTokens: number;
+          categories: readonly { name: string; tokens: number; kind: string }[];
+        };
+      };
+    }>;
+  };
+};
+
+/**
+ * The context's fill against the compaction window. `context.percent` counts
+ * against the model's whole window, while Claude Code compacts at a smaller
+ * one when `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or a setting says so; the
+ * breakdown counts against that one. `summary` estimates it locally and sends
+ * no request. Without a breakdown, the model-window percent.
+ */
+export async function contextFill($: UsageHost): Promise<ContextFill> {
+  const { context } = await $.session.usage({ breakdown: 'summary' });
+  const breakdown = context.breakdown;
+  if (!breakdown || !Number.isFinite(breakdown.percentage)) return { percent: context.percent };
+  const messages = breakdown.categories.find((c) => c.kind === 'used' && c.name === 'Messages');
+  const used = breakdown.categories.filter((c) => c.kind === 'used').reduce((sum, c) => sum + c.tokens, 0);
+  const fixedShare = messages && used > 0 ? Math.min(1, Math.max(0, (used - messages.tokens) / used)) : undefined;
+  return { percent: breakdown.percentage, fixedShare };
+}
+
+/**
+ * Context percent after compaction: the fixed share stays, the rest shrinks
+ * like the transcript's characters. Undefined when usage or the character
+ * counts give nothing to scale.
  */
 export function estimatePostCompactPercent(
-  percentBefore: number | undefined,
+  before: ContextFill | number | undefined,
   stats: Pick<CompactResult['stats'], 'charsBefore' | 'charsAfter'>,
 ): number | undefined {
-  if (percentBefore === undefined || !Number.isFinite(percentBefore)) return undefined;
+  const fill = typeof before === 'number' || before === undefined ? { percent: before } : before;
+  const percent = fill.percent;
+  if (percent === undefined || !Number.isFinite(percent)) return undefined;
   if (stats.charsBefore <= 0) return undefined;
-  return (percentBefore * stats.charsAfter) / stats.charsBefore;
+  const fixed = fill.fixedShare ?? 0;
+  return percent * (fixed + ((1 - fixed) * stats.charsAfter) / stats.charsBefore);
 }
 
 /** True when the estimate is known and above `targetPercent`. */
@@ -841,11 +886,11 @@ export const register: Register = (on: On, options: PluginOptions) => {
         apiKey: await getApiKey($, configured),
         instructions: queued ? undefined : event.instructions,
       };
-      let percentBefore: number | undefined;
+      let fillBefore: ContextFill = {};
       try {
-        percentBefore = (await $.session.usage()).context.percent;
+        fillBefore = await contextFill($);
       } catch {
-        percentBefore = undefined;
+        fillBefore = {};
       }
       // A retry with the digest shares the one compactionTimeoutMs budget.
       const deadlineAt = Date.now() + config.compactionTimeoutMs;
@@ -926,7 +971,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
         } catch (error) {
           hiddenNote += `; hidden content not folded (${error instanceof Error ? error.message : String(error)})`;
         }
-        const estimate = estimatePostCompactPercent(percentBefore, measured.stats);
+        const estimate = estimatePostCompactPercent(fillBefore, measured.stats);
         const ratio = reductionRatio(measured);
         if (ratio > 0 && (!best || ratio > best.ratio)) {
           best = { messages: withoutHandles(returned), ratio, detail: `${summarize(measured)}${hiddenNote}` };
@@ -986,8 +1031,7 @@ export const register: Register = (on: On, options: PluginOptions) => {
     compacting = true;
     let used = 0;
     try {
-      const { context } = await $.session.usage();
-      used = context.percent ?? 0;
+      used = (await contextFill($)).percent ?? 0;
       if (used < configured.compactAtPercent) retryAtPercent = 0;
       if (used < Math.max(configured.compactAtPercent, retryAtPercent)) return next(event);
       const { skip } = await $.session.compact();
