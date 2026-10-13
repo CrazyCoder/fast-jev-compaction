@@ -320,10 +320,12 @@ to, and never on every prompt:
   `[jetcompact note]` that says what this compaction cut (results cut to heads,
   calls stubbed or dropped, messages digested) and to use recall before running
   a tool again or saying something earlier is gone, with an assistant
-  acknowledgement. Each compaction replaces it, so there is only ever one; a
-  compaction that cut nothing writes none. It is part of the conversation, so it
-  survives a restart and `--resume`, until Claude Code's built-in summary
-  replaces the history.
+  acknowledgement. When the compaction cut the text of documents the
+  conversation read (Markdown and plain text), the note names them and tells the
+  model to read again any that holds instructions for the current work. Each
+  compaction replaces it, so there is only ever one; a compaction that cut
+  nothing writes none. It is part of the conversation, so it survives a restart
+  and `--resume`, until Claude Code's built-in summary replaces the history.
 
 ### `/recall-index`
 

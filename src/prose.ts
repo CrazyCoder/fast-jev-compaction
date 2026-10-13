@@ -106,6 +106,8 @@ interface Turn {
   prompt: string;
   reply: string;
   tools: Map<string, number>;
+  /** The paths the turn's Read calls opened, in order, without repeats. */
+  reads: string[];
   text: string;
 }
 
@@ -115,16 +117,18 @@ function groupTurns(old: readonly Message[]): Turn[] {
   for (const message of old) {
     if (parseCondensed(message) || isAck(message)) continue;
     if (isUserTurn(message)) {
-      current = { prompt: stripHostText(message.text).trim(), reply: '', tools: new Map(), text: '' };
+      current = { prompt: stripHostText(message.text).trim(), reply: '', tools: new Map(), reads: [], text: '' };
       turns.push(current);
     } else if (!current) {
-      current = { prompt: '', reply: '', tools: new Map(), text: '' };
+      current = { prompt: '', reply: '', tools: new Map(), reads: [], text: '' };
       turns.push(current);
     }
     if (message.role === 'assistant') {
       if (message.text.trim()) current.reply = message.text.trim();
       for (const use of message.toolUses) {
         current.tools.set(use.tool, (current.tools.get(use.tool) ?? 0) + 1);
+        const path = use.tool === 'Read' ? use.input['file_path'] : undefined;
+        if (typeof path === 'string' && path && !current.reads.includes(path)) current.reads.push(path);
         current.text += `\n${JSON.stringify(use.input).slice(0, 2000)}`;
       }
     }
@@ -291,6 +295,7 @@ export function buildSummaryPrompt(old: readonly Message[]): string {
     if (turn.tools.size > 0) {
       lines.push(`TOOLS: ${[...turn.tools].map(([tool, n]) => `${tool}×${n}`).join(', ')}`);
     }
+    if (turn.reads.length > 0) lines.push(`READ: ${truncate(turn.reads.join(', '), 1500)}`);
     if (turn.reply) lines.push(`ASSISTANT: ${truncate(turn.reply, 1500)}`);
   }
   let transcript = lines.join('\n');

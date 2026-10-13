@@ -10,7 +10,7 @@ import type {
 } from './types.js';
 
 export const STATE_CONTEXT =
-  'A coding assistant conversation is being compacted to free context. `history` is the whole conversation so far, oldest first; tool outputs are replaced by a short `result` note and long texts may be abridged. Each question asks whether one tool call, or the full output of that call, still needs to stay in the history verbatim. Whatever is not kept is deleted permanently, but the assistant can always re-run a tool or re-read a file.';
+  'A coding assistant conversation is being compacted to free context. `history` is the whole conversation so far, oldest first; tool outputs are replaced by a short `result` note and long texts may be abridged. Each question asks whether one tool call, or the full output of that call, still needs to stay in the history verbatim. Whatever is not kept is deleted permanently, but the assistant can always re-run a tool or re-read a file. It will not know to re-read instructions it was following.';
 
 /** Successive caps on the serialised tool input included per call. */
 const INPUT_CHARS = [1000, 200, 60] as const;

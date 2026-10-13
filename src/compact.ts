@@ -80,6 +80,7 @@ export function withoutCompactionNote<T extends Turn>(messages: readonly T[]): r
  */
 function compactionNote(
   stats: Pick<CompactResult['stats'], 'resultsDropped' | 'callsStubbed' | 'callsDropped' | 'oldProseReplaced'>,
+  documents: readonly string[],
 ): string | undefined {
   const parts = [
     stats.resultsDropped > 0 && `${stats.resultsDropped} tool results cut to their first characters`,
@@ -92,7 +93,39 @@ function compactionNote(
     `${NOTE_MARKER} This conversation was compacted to fit the context: ${parts.join(', ')}.`,
     'Nothing was deleted from the session transcript. A cut note names its tool_use_id: recall expand ["<id>"] returns that call and result in full, and recall query searches everything earlier.',
     'Use recall before running a tool again to see an old result, and before saying something from earlier is gone.',
-  ].join(' ');
+    documents.length > 0 &&
+      `Documents read earlier whose text this compaction cut: ${documents.map((path) => `\`${path}\``).join(', ')}. Read again, in full, any that holds instructions for the current work.`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** A file whose text is prose to follow rather than code: Markdown, plain text and kin. */
+const DOCUMENT = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
+/** Most documents the note names, the most recently read first. */
+const MAX_NOTE_DOCUMENTS = 8;
+
+/**
+ * The documents `history` read with the Read tool that the compacted
+ * conversation no longer holds in full: read in a turn the digest replaced, or
+ * by a call whose result was cut, with no later Read of the same path kept.
+ * Most recently read first.
+ */
+function cutDocuments(history: readonly Message[], calls: readonly ToolCall[], decisions: readonly CallDecision[]): string[] {
+  const keptIds = new Set(
+    decisions.filter((d) => d.reason === 'kept' || d.reason === 'pinned').map((d) => d.id),
+  );
+  const kept = new Set(
+    calls.filter((call) => call.tool === 'Read' && keptIds.has(call.id)).map((call) => pathOf(call)),
+  );
+  const read: string[] = [];
+  for (const message of history) {
+    for (const use of message.toolUses) {
+      const path = use.tool === 'Read' ? normalPath(use.input['file_path']) : undefined;
+      if (path && DOCUMENT.test(path)) read.push(path);
+    }
+  }
+  return [...new Set(read.reverse())].filter((path) => !kept.has(path)).slice(0, MAX_NOTE_DOCUMENTS);
 }
 
 function finite(value: number | undefined, fallback: number): number {
@@ -272,8 +305,8 @@ const CALL_CRITERIA = {
   false: 'The call only gathered information that has since been superseded or acted upon: a search used to locate a file that was then edited, a read of a file that has since changed, a failing check that has since been fixed',
 };
 const RESULT_CRITERIA = {
-  true: 'The exact contents are still in use and could not be recovered by re-running the tool: an error the assistant is still diagnosing, output the user asked about, the current state of a file being edited',
-  false: 'The contents are stale, already stated in the assistant text, or trivially re-obtainable: a directory listing already used, a passing test run, a file read before it was rewritten',
+  true: 'The exact contents are still in use and could not be recovered by re-running the tool: an error the assistant is still diagnosing, output the user asked about, the current state of a file being edited, instructions the assistant was told to follow for the rest of the work (rules, preferences, conventions, a runbook)',
+  false: 'The contents are stale, already stated in the assistant text, or trivially re-obtainable: a directory listing already used, a passing test run, a file read before it was rewritten, a document consulted once for a fact already used',
 };
 
 /**
@@ -867,7 +900,7 @@ export async function compact(
     callsStubbed: count(decisions, 'call_stubbed'),
     oldProseReplaced: prose.replaced,
   };
-  const note = resolved.recallNotes ? compactionNote(cut) : undefined;
+  const note = resolved.recallNotes ? compactionNote(cut, cutDocuments(history, calls, decisions)) : undefined;
   if (note) {
     kept.unshift(
       { role: 'user', text: note, toolUses: [] },

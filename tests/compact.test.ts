@@ -176,10 +176,10 @@ describe('state fitting', () => {
     ];
     const { state, stage, tokens } = fitState(messages, collectToolCalls(messages, 0), {
       ...fit,
-      maxStateTokens: 300,
+      maxStateTokens: 320,
     });
     expect(stage).toBe('inputs<=200');
-    expect(tokens).toBeLessThanOrEqual(300);
+    expect(tokens).toBeLessThanOrEqual(320);
     expect(state.history[0]?.text).toBe('start');
     expect((state.history[1]?.tool_calls?.[0] as HistoryToolCall).input.length).toBeLessThanOrEqual(200);
   });
@@ -430,6 +430,46 @@ describe('decisions', () => {
     // Without recall there is nothing to point at; with nothing cut, nothing to say.
     expect((await compact(transcript(), fakeJev(() => 0.01), { ...options, recallNotes: false })).messages.some(isNote)).toBe(false);
     expect((await compact(transcript(), fakeJev(() => 0.99), options)).messages.some(isNote)).toBe(false);
+  });
+
+  it('names in the note the documents whose text was cut, so the model can read their instructions again', async () => {
+    const doc = 'Always run the linter before a commit.\n'.repeat(40);
+    const messages = [
+      message('user', 'Follow docs/rules.md while you fix the bug.'),
+      call('tool-1', 'Read', { file_path: 'docs\\rules.md' }, doc),
+      result('tool-1', doc),
+      call('tool-2', 'Read', { file_path: 'src/a.ts' }, fileA),
+      result('tool-2', fileA),
+      call('tool-3', 'Read', { file_path: 'NOTES.md' }, doc),
+      result('tool-3', doc),
+      message('assistant', 'Reading done.'),
+    ];
+    const options = { ...fit, keepMode: 'threshold' as const, recallNotes: true };
+    // t3 (NOTES.md) stays whole; the rest is cut.
+    const out = await compact(messages, fakeJev((key) => (key.endsWith('t3') ? 0.99 : 0.01)), options);
+    const note = out.messages[0]!.text;
+    expect(note).toMatch(/Documents read earlier whose text this compaction cut: `docs\/rules\.md`\. Read again/);
+    expect(note).not.toContain('NOTES.md');
+    expect(note).not.toContain('src/a.ts');
+    // Nothing cut, nothing to name.
+    expect((await compact(messages, fakeJev(() => 0.99), options)).messages[0]!.text).toBe(messages[0]!.text);
+  });
+
+  it('names a document read in a turn the digest replaced', async () => {
+    const doc = 'Use tabs.\n'.repeat(40);
+    const messages: Message[] = [];
+    for (let n = 1; n <= 6; n += 1) {
+      messages.push(
+        message('user', `step ${n}`),
+        call(`tool-${n}`, 'Read', { file_path: n === 1 ? 'STYLE.md' : `src/f${n}.ts` }, doc),
+        result(`tool-${n}`, doc),
+        message('assistant', `done ${n}`),
+      );
+    }
+    const options = { ...fit, keepMode: 'threshold' as const, recallNotes: true, oldProse: 'digest' as const, recentTurns: 2 };
+    const out = await compact(messages, fakeJev(() => 0.99), options);
+    expect(out.stats.oldProseReplaced).toBeGreaterThan(0);
+    expect(out.messages[0]!.text).toMatch(/cut: `STYLE\.md`\./);
   });
 
   it('gives a cut recall answer the plain note: recall cannot expand its own calls', () => {

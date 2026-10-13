@@ -202,6 +202,8 @@ describe('condenseOldProse', () => {
     expect(parseCondensed(second.messages[0]!)!.turns).toBe(8);
     expect(second.messages.filter((m) => parseCondensed(m))).toHaveLength(1);
     expect(first.messages[0]!.text.split('\n')[0]).toBe('[jetcompact summary of 6 earlier turns]');
+    // The summarizer sees which files the turns read, not only how many calls they made.
+    expect(prompts[0]).toContain('READ: src/file1.ts');
   });
 
   it('names the recall tool in a summary header when recall is on, and still reads as a summary', async () => {

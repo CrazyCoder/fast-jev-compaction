@@ -3,6 +3,24 @@
 All notable changes to this fork are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- The compaction note names the documents (Markdown and plain text) that the
+  conversation read and the compaction cut, and tells the model to read again
+  any that holds instructions for the current work. A file of rules or
+  preferences is cheap to re-read, but once its text is gone the model does not
+  know it should.
+- `oldProse: summarize` shows the summarizing model which files each turn read,
+  not only how many tool calls it made.
+
+### Changed
+
+- The decision model is told that the assistant will not re-read instructions it
+  was following. Its result criteria count such instructions as worth keeping,
+  and a document consulted once for a fact as safe to drop.
+
 ## [0.12.0]
 
 ### Changed
