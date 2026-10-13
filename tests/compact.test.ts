@@ -455,6 +455,15 @@ describe('decisions', () => {
     expect((await compact(messages, fakeJev(() => 0.99), options)).messages[0]!.text).toBe(messages[0]!.text);
   });
 
+  it('names the cut documents with the algorithmic decider too', async () => {
+    const doc = 'Never push without asking.\n'.repeat(200);
+    const messages: Message[] = [message('user', 'Read RULES.md, then fix the bug.'), call('tool-r', 'Read', { file_path: 'RULES.md' }, doc), result('tool-r', doc)];
+    for (let n = 1; n <= 8; n += 1) messages.push(call(`tool-${n}`, 'Bash', { command: `npm test -- case${n}` }, 'ok'), result(`tool-${n}`, 'ok'));
+    messages.push(message('assistant', 'All green.'));
+    const out = await compact(messages, fakeJev(() => 0.99), { ...fit, keepMode: 'threshold', recallNotes: true, decider: 'algorithmic' });
+    expect(out.messages[0]!.text).toMatch(/cut: `RULES\.md`\./);
+  });
+
   it('names a document read in a turn the digest replaced', async () => {
     const doc = 'Use tabs.\n'.repeat(40);
     const messages: Message[] = [];
